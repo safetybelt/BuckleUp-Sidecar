@@ -1,0 +1,62 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  package-and-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Prepare addon package
+        shell: pwsh
+        run: |
+          $addonName = "BuckleUpSidecar"
+          $stagingRoot = Join-Path $env:RUNNER_TEMP "package"
+          $addonRoot = Join-Path $stagingRoot $addonName
+
+          if (Test-Path $stagingRoot) {
+            Remove-Item -Recurse -Force $stagingRoot
+          }
+
+          New-Item -ItemType Directory -Path $addonRoot | Out-Null
+
+          $includePaths = @(
+            "BuckleUpSidecar.lua",
+            "BuckleUpSidecar.toc",
+            "README.md",
+            "CHANGELOG.md",
+            "LICENSE",
+            "Core",
+            "Runtime",
+            "UI",
+            "Media"
+          )
+
+          foreach ($path in $includePaths) {
+            Copy-Item -Recurse -Force $path $addonRoot
+          }
+
+          New-Item -ItemType Directory -Path "dist" -Force | Out-Null
+          $zipPath = Join-Path (Resolve-Path "dist") "$addonName-${{ github.ref_name }}.zip"
+
+          if (Test-Path $zipPath) {
+            Remove-Item -Force $zipPath
+          }
+
+          Compress-Archive -Path $addonRoot -DestinationPath $zipPath
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist/BuckleUpSidecar-${{ github.ref_name }}.zip
