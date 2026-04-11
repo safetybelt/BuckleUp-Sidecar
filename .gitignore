@@ -1,0 +1,21 @@
+# OS / editor noise
+Thumbs.db
+Desktop.ini
+.DS_Store
+*.tmp
+*.bak
+*.orig
+
+# Local tooling
+.idea/
+.vscode/
+
+# GitHub release artifacts
+dist/
+*.zip
+
+# Private planning docs
+V1_SPEC.md
+V2_SPEC.md
+*_SPEC.md
+
