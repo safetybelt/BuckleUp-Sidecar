@@ -293,11 +293,17 @@ frame:SetScript("OnEvent", function(_, event, ...)
 		if loadedAddon == addonName and addon.CooldownViewerSkin then
 			addon.CooldownViewerSkin:RefreshAll()
 		end
+		if loadedAddon == addonName and addon.EditMode then
+			addon.EditMode:Initialize()
+		end
 		if loadedAddon == "Blizzard_CooldownViewer" and addon.SettingsIntegration then
 			addon.SettingsIntegration:Initialize()
 		end
 		if loadedAddon == "Blizzard_CooldownViewer" and addon.CooldownViewerSkin then
 			addon.CooldownViewerSkin:RefreshAll()
+		end
+		if loadedAddon == "Blizzard_EditMode" and addon.EditMode then
+			addon.EditMode:Initialize()
 		end
 		return
 	end
@@ -308,6 +314,9 @@ frame:SetScript("OnEvent", function(_, event, ...)
 		addon.Bars:RefreshRuntime()
 		if addon.SettingsIntegration then
 			addon.SettingsIntegration:Initialize()
+		end
+		if addon.EditMode then
+			addon.EditMode:Initialize()
 		end
 		SLASH_BUCKLEUPSIDECAR1 = "/bus"
 		SlashCmdList.BUCKLEUPSIDECAR = HandleSlash

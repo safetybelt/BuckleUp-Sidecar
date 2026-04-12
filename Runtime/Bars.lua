@@ -4,6 +4,7 @@ local util = addon.Util
 local constants = addon.Constants
 local skin = addon.CooldownViewerSkin
 local readiness = addon.Readiness
+local editMode = addon.EditMode
 
 local Bars = {}
 addon.Bars = Bars
@@ -19,89 +20,23 @@ local function CreateBackdrop(frame)
 	end
 end
 
-local function IsBarLocked()
-	return addon.Profile and addon.Profile:IsLocked()
+local function ApplyStoredBarPlacement(barFrame, bar)
+	if editMode then
+		editMode:ApplyBarAnchor(barFrame, bar)
+	end
 end
 
-local function ResolveAnchorFrame(anchorTarget)
-	if anchorTarget == constants.ANCHOR_TARGET_ESSENTIAL then
-		return _G.EssentialCooldownViewer
-	elseif anchorTarget == constants.ANCHOR_TARGET_UTILITY then
-		return _G.UtilityCooldownViewer
+local function CanDragBarFrame(barID)
+	if editMode then
+		return editMode:CanBarBeDragged(barID)
 	end
-	return UIParent
+	return false
 end
 
-local function GetAttachedAnchorPoints(bar)
-	if bar.anchorTarget == constants.ANCHOR_TARGET_SCREEN then
-		return bar.point or "CENTER", bar.relativePoint or bar.point or "CENTER"
+local function PersistDraggedBarPlacement(barID, frame)
+	if editMode then
+		editMode:SaveBarAnchor(barID, frame)
 	end
-
-	if bar.anchorSide == constants.ANCHOR_SIDE_LEFT then
-		return "RIGHT", "LEFT"
-	elseif bar.anchorSide == constants.ANCHOR_SIDE_RIGHT then
-		return "LEFT", "RIGHT"
-	elseif bar.anchorSide == constants.ANCHOR_SIDE_TOP then
-		return "BOTTOM", "TOP"
-	elseif bar.anchorSide == constants.ANCHOR_SIDE_BOTTOM then
-		return "TOP", "BOTTOM"
-	end
-	return "TOP", "BOTTOM"
-end
-
-local function GetAttachedAnchorOffset(bar)
-	if bar.anchorTarget == constants.ANCHOR_TARGET_SCREEN then
-		return 0, 0
-	end
-
-	if bar.anchorSide == constants.ANCHOR_SIDE_LEFT then
-		return 6, 0
-	elseif bar.anchorSide == constants.ANCHOR_SIDE_RIGHT then
-		return -6, 0
-	elseif bar.anchorSide == constants.ANCHOR_SIDE_TOP then
-		return 0, -6
-	elseif bar.anchorSide == constants.ANCHOR_SIDE_BOTTOM then
-		return 0, 6
-	end
-
-	return 0, 0
-end
-
-local function ApplySavedBarPosition(barFrame, bar)
-	local anchorFrame = ResolveAnchorFrame(bar.anchorTarget)
-	barFrame:ClearAllPoints()
-	local point, relativePoint = GetAttachedAnchorPoints(bar)
-	local baseX, baseY = GetAttachedAnchorOffset(bar)
-	barFrame:SetPoint(point, anchorFrame, relativePoint, baseX + (bar.x or 0), baseY + (bar.y or 0))
-end
-
-local function IsBarDirectlyMovable(barID)
-	if IsBarLocked() then
-		return false
-	end
-	local bar = addon.Profile:GetBarByID(barID)
-	return bar and bar.anchorTarget == constants.ANCHOR_TARGET_SCREEN
-end
-
-local function SaveDraggedBarPosition(barID, frame)
-	local bar = addon.Profile:GetBarByID(barID)
-	if not bar then
-		return
-	end
-
-	local point, _, relativePoint, x, y = frame:GetPoint(1)
-	local layout = {
-		x = util.NumberOrNil(x) or 0,
-		y = util.NumberOrNil(y) or 0,
-	}
-
-	if bar.anchorTarget == constants.ANCHOR_TARGET_SCREEN then
-		layout.point = point
-		layout.relativePoint = relativePoint
-	end
-
-	addon.Profile:UpdateBarLayout(barID, layout)
-	addon.Profile:RecordLayoutSnapshot()
 end
 
 local function ResetCooldown(button)
@@ -284,11 +219,21 @@ function Bars:CreateButton(parent)
 	end)
 	button:RegisterForDrag("LeftButton")
 	button:SetScript("OnDragStart", function(self)
-		if not self:GetParent() or not IsBarDirectlyMovable(self:GetParent().barID) then
+		if not self:GetParent() or not CanDragBarFrame(self:GetParent().barID) then
 			return
+		end
+		if editMode and editMode:IsActive() then
+			editMode:SelectBarFrame(self:GetParent())
+			if self:GetParent().ClearFrameSnap then
+				self:GetParent():ClearFrameSnap()
+			end
+			if EditModeManagerFrame and EditModeManagerFrame.SetSnapPreviewFrame then
+				EditModeManagerFrame:SetSnapPreviewFrame(self:GetParent())
+			end
 		end
 		if self:GetParent() and self:GetParent():IsMovable() then
 			addon.isDraggingBar[self:GetParent().barID] = true
+			self:GetParent().isDragging = true
 			self:GetParent():StartMoving()
 		end
 	end)
@@ -296,8 +241,18 @@ function Bars:CreateButton(parent)
 		if self:GetParent() then
 			self:GetParent():StopMovingOrSizing()
 			local parent = self:GetParent()
+			parent.isDragging = false
+			if editMode and editMode:IsActive() then
+				if EditModeManagerFrame and EditModeManagerFrame.ClearSnapPreviewFrame then
+					EditModeManagerFrame:ClearSnapPreviewFrame()
+				end
+				if EditModeMagnetismManager then
+					pcall(EditModeMagnetismManager.ApplyMagnetism, EditModeMagnetismManager, parent)
+				end
+				editMode:ApplyKnownTargetAlignment(parent)
+			end
 			addon.isDraggingBar[parent.barID] = nil
-			SaveDraggedBarPosition(parent.barID, parent)
+			PersistDraggedBarPlacement(parent.barID, parent)
 		end
 	end)
 
@@ -317,20 +272,45 @@ function Bars:CreateBarFrame(bar)
 	frame.barID = bar.id
 	frame.buttons = {}
 	frame:SetClampedToScreen(true)
-	frame:SetMovable(true)
-	frame:EnableMouse(true)
+	frame:SetMovable(false)
+	frame:EnableMouse(false)
 	frame:RegisterForDrag("LeftButton")
 	frame:SetScript("OnDragStart", function(self)
-		if not IsBarDirectlyMovable(self.barID) then
+		if not CanDragBarFrame(self.barID) then
 			return
 		end
+		if editMode and editMode:IsActive() then
+			editMode:SelectBarFrame(self)
+			if self.ClearFrameSnap then
+				self:ClearFrameSnap()
+			end
+			if EditModeManagerFrame and EditModeManagerFrame.SetSnapPreviewFrame then
+				EditModeManagerFrame:SetSnapPreviewFrame(self)
+			end
+		end
 		addon.isDraggingBar[self.barID] = true
+		self.isDragging = true
 		self:StartMoving()
 	end)
 	frame:SetScript("OnDragStop", function(self)
 		self:StopMovingOrSizing()
+		self.isDragging = false
+		if editMode and editMode:IsActive() then
+			if EditModeManagerFrame and EditModeManagerFrame.ClearSnapPreviewFrame then
+				EditModeManagerFrame:ClearSnapPreviewFrame()
+			end
+			if EditModeMagnetismManager then
+				pcall(EditModeMagnetismManager.ApplyMagnetism, EditModeMagnetismManager, self)
+			end
+			editMode:ApplyKnownTargetAlignment(self)
+		end
 		addon.isDraggingBar[self.barID] = nil
-		SaveDraggedBarPosition(self.barID, self)
+		PersistDraggedBarPlacement(self.barID, self)
+	end)
+	frame:SetScript("OnMouseDown", function(self)
+		if editMode and editMode:IsActive() then
+			editMode:SelectBarFrame(self)
+		end
 	end)
 
 	frame.Title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -352,15 +332,21 @@ function Bars:EnsureBarFrames()
 			frame = self:CreateBarFrame(bar)
 			addon.barFrames[bar.id] = frame
 		end
+		if editMode then
+			editMode:AttachBarFrame(frame)
+		end
 		active[bar.id] = true
 		if not addon.isDraggingBar[bar.id] then
-			ApplySavedBarPosition(frame, bar)
+			ApplyStoredBarPlacement(frame, bar)
 		end
 		frame.Title:SetText(bar.name)
-		frame.Title:SetShown(not addon.Profile:IsLocked())
-		frame:SetMovable(IsBarDirectlyMovable(bar.id))
-		frame:EnableMouse(not addon.Profile:IsLocked())
+		frame.Title:SetShown(editMode and editMode:IsActive())
+		frame:SetMovable(CanDragBarFrame(bar.id))
+		frame:EnableMouse(editMode and editMode:IsActive())
 		frame:Show()
+		if editMode then
+			editMode:RefreshBarFrame(frame)
+		end
 	end
 
 	for barID, frame in pairs(addon.barFrames) do

@@ -21,12 +21,11 @@ local function NormalizeBar(bar, index)
 	normalized.name = normalized.name or ("Bar " .. tostring(index))
 	normalized.point = normalized.point or "CENTER"
 	normalized.relativePoint = normalized.relativePoint or normalized.point
+	normalized.relativeTo = type(normalized.relativeTo) == "string" and normalized.relativeTo or "UIParent"
 	normalized.x = util.NumberOrNil(normalized.x) or 0
 	normalized.y = util.NumberOrNil(normalized.y) or 0
 	normalized.iconSize = util.NumberOrNil(normalized.iconSize) or 40
 	normalized.spacing = util.NumberOrNil(normalized.spacing) or 6
-	normalized.anchorTarget = normalized.anchorTarget or constants.ANCHOR_TARGET_SCREEN
-	normalized.anchorSide = normalized.anchorSide or constants.ANCHOR_SIDE_BOTTOM
 	normalized.growthDirection = normalized.growthDirection or constants.GROWTH_RIGHT
 	normalized.enabled = normalized.enabled ~= false
 	return normalized
@@ -112,9 +111,6 @@ function Profile:NormalizeProfile(profile)
 	if normalized.options.hidePassiveTrinkets == nil then
 		normalized.options.hidePassiveTrinkets = true
 	end
-	if normalized.options.locked == nil then
-		normalized.options.locked = false
-	end
 	if normalized.options.showTooltips == nil then
 		normalized.options.showTooltips = true
 	end
@@ -146,18 +142,6 @@ end
 
 function Profile:GetOptions()
 	return addon.profile and addon.profile.options or {}
-end
-
-function Profile:IsLocked()
-	return self:GetOptions().locked == true
-end
-
-function Profile:SetLocked(locked)
-	local options = self:GetOptions()
-	options.locked = locked == true
-	self:CommitProfile()
-	self:RecordLayoutSnapshot()
-	return true
 end
 
 function Profile:ShowTooltips()

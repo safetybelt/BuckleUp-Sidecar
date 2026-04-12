@@ -9,28 +9,6 @@ local TILE_GAP = 8
 local LANE_PADDING = 10
 local MIN_LANE_HEIGHT = 78
 local modifiedItemHookInstalled = false
-local anchorTargetCycle = {
-	addon.Constants.ANCHOR_TARGET_SCREEN,
-	addon.Constants.ANCHOR_TARGET_ESSENTIAL,
-	addon.Constants.ANCHOR_TARGET_UTILITY,
-}
-local anchorTargetLabel = {
-	[addon.Constants.ANCHOR_TARGET_SCREEN] = "Screen",
-	[addon.Constants.ANCHOR_TARGET_ESSENTIAL] = "Essential",
-	[addon.Constants.ANCHOR_TARGET_UTILITY] = "Utility",
-}
-local anchorSideCycle = {
-	addon.Constants.ANCHOR_SIDE_LEFT,
-	addon.Constants.ANCHOR_SIDE_RIGHT,
-	addon.Constants.ANCHOR_SIDE_TOP,
-	addon.Constants.ANCHOR_SIDE_BOTTOM,
-}
-local anchorSideLabel = {
-	[addon.Constants.ANCHOR_SIDE_LEFT] = "Left",
-	[addon.Constants.ANCHOR_SIDE_RIGHT] = "Right",
-	[addon.Constants.ANCHOR_SIDE_TOP] = "Top",
-	[addon.Constants.ANCHOR_SIDE_BOTTOM] = "Bottom",
-}
 local growthDirectionCycle = {
 	addon.Constants.GROWTH_LEFT,
 	addon.Constants.GROWTH_CENTER,
@@ -380,6 +358,28 @@ local function OpenAddEntryDialog(kind)
 	StaticPopup_Show(dialogKey)
 end
 
+local function OpenBlizzardEditMode()
+	if not EditModeManagerFrame and type(UIParentLoadAddOn) == "function" then
+		UIParentLoadAddOn("Blizzard_EditMode")
+	end
+
+	if not EditModeManagerFrame then
+		if addon.Print then
+			addon.Print("Blizzard Edit Mode is not available.")
+		end
+		return
+	end
+
+	if EditModeManagerFrame.CanEnterEditMode and not EditModeManagerFrame:CanEnterEditMode() then
+		if addon.Print then
+			addon.Print("Blizzard Edit Mode can't be opened right now.")
+		end
+		return
+	end
+
+	ShowUIPanel(EditModeManagerFrame)
+end
+
 function SettingsIntegration:GetContainerDefinitions()
 	local containers = {}
 	for _, bar in ipairs(addon.Profile:GetBars()) do
@@ -546,7 +546,7 @@ function SettingsIntegration:CreateLane(parent)
 	end)
 
 	lane.LayoutEditor = CreateFrame("Frame", nil, lane, "BackdropTemplate")
-	lane.LayoutEditor:SetHeight(66)
+	lane.LayoutEditor:SetHeight(42)
 	lane.LayoutEditor:SetPoint("TOPLEFT", lane.Header, "BOTTOMLEFT", 6, -6)
 	lane.LayoutEditor:SetPoint("TOPRIGHT", lane.Header, "BOTTOMRIGHT", -6, -6)
 	lane.LayoutEditor:SetBackdrop({
@@ -609,32 +609,8 @@ function SettingsIntegration:CreateLane(parent)
 	lane.LayoutSpacingUp.Text:SetAllPoints()
 	lane.LayoutSpacingUp.Text:SetText("+")
 
-	lane.LayoutAnchorLabel = lane.LayoutEditor:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	lane.LayoutAnchorLabel:SetPoint("TOPLEFT", lane.LayoutEditor, "TOPLEFT", 14, -38)
-	lane.LayoutAnchorLabel:SetTextColor(0.82, 0.82, 0.82)
-	lane.LayoutAnchorLabel:SetText("Anchor")
-
-	lane.LayoutAnchorButton = CreateFrame("Button", nil, lane.LayoutEditor)
-	lane.LayoutAnchorButton:SetSize(72, 18)
-	lane.LayoutAnchorButton:SetPoint("LEFT", lane.LayoutAnchorLabel, "RIGHT", 10, 0)
-	lane.LayoutAnchorButton.Text = lane.LayoutAnchorButton:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	lane.LayoutAnchorButton.Text:SetAllPoints()
-	lane.LayoutAnchorButton.Text:SetJustifyH("CENTER")
-
-	lane.LayoutSideLabel = lane.LayoutEditor:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	lane.LayoutSideLabel:SetPoint("TOPLEFT", lane.LayoutEditor, "TOPLEFT", 154, -38)
-	lane.LayoutSideLabel:SetTextColor(0.82, 0.82, 0.82)
-	lane.LayoutSideLabel:SetText("Side")
-
-	lane.LayoutSideButton = CreateFrame("Button", nil, lane.LayoutEditor)
-	lane.LayoutSideButton:SetSize(58, 18)
-	lane.LayoutSideButton:SetPoint("LEFT", lane.LayoutSideLabel, "RIGHT", 10, 0)
-	lane.LayoutSideButton.Text = lane.LayoutSideButton:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	lane.LayoutSideButton.Text:SetAllPoints()
-	lane.LayoutSideButton.Text:SetJustifyH("CENTER")
-
 	lane.LayoutGrowthLabel = lane.LayoutEditor:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	lane.LayoutGrowthLabel:SetPoint("TOPLEFT", lane.LayoutEditor, "TOPLEFT", 258, -38)
+	lane.LayoutGrowthLabel:SetPoint("TOPLEFT", lane.LayoutEditor, "TOPLEFT", 306, -14)
 	lane.LayoutGrowthLabel:SetTextColor(0.82, 0.82, 0.82)
 	lane.LayoutGrowthLabel:SetText("Grow")
 
@@ -726,7 +702,7 @@ function SettingsIntegration:LayoutLane(lane, entries)
 	end
 
 	local rows = math.max(1, math.floor((#entries - 1) / columns) + 1)
-	local layoutExtra = lane.layoutExpanded and 78 or 0
+	local layoutExtra = lane.layoutExpanded and 54 or 0
 	lane:SetHeight(math.max(MIN_LANE_HEIGHT, 30 + layoutExtra + (rows * TILE_SIZE) + ((rows - 1) * TILE_GAP) + 6))
 end
 
@@ -754,15 +730,7 @@ function SettingsIntegration:CycleBarLayoutValue(barID, field, cycle)
 	end
 
 	local nextValue = GetNextCycleValue(cycle, bar[field])
-	local layoutUpdate = { [field] = nextValue }
-	if field == "anchorTarget" then
-		layoutUpdate.x = 0
-		layoutUpdate.y = 0
-		if nextValue ~= addon.Constants.ANCHOR_TARGET_SCREEN and (bar.anchorSide == nil or bar.anchorSide == addon.Constants.ANCHOR_SIDE_BOTTOM) then
-			layoutUpdate.anchorSide = addon.Constants.ANCHOR_SIDE_RIGHT
-		end
-	end
-	addon.Profile:UpdateBarLayout(barID, layoutUpdate)
+	addon.Profile:UpdateBarLayout(barID, { [field] = nextValue })
 	addon.Bars:RefreshRuntime()
 	self:RefreshPanel()
 end
@@ -876,8 +844,6 @@ function SettingsIntegration:RefreshLanes()
 				lane.LayoutEditor:Show()
 				lane.LayoutSizeValue:SetText(tostring(currentBar.iconSize or 40))
 				lane.LayoutSpacingValue:SetText(tostring(currentBar.spacing or 6))
-				lane.LayoutAnchorButton.Text:SetText(anchorTargetLabel[currentBar.anchorTarget] or "Screen")
-				lane.LayoutSideButton.Text:SetText(anchorSideLabel[currentBar.anchorSide] or "Center")
 				lane.LayoutGrowthButton.Text:SetText(growthDirectionLabel[currentBar.growthDirection] or "Right")
 				lane.LayoutSizeDown:SetScript("OnClick", function()
 					SettingsIntegration:AdjustBarLayout(container.id, "iconSize", -2, 24, 72)
@@ -890,12 +856,6 @@ function SettingsIntegration:RefreshLanes()
 				end)
 				lane.LayoutSpacingUp:SetScript("OnClick", function()
 					SettingsIntegration:AdjustBarLayout(container.id, "spacing", 1, 0, 24)
-				end)
-				lane.LayoutAnchorButton:SetScript("OnClick", function()
-					SettingsIntegration:CycleBarLayoutValue(container.id, "anchorTarget", anchorTargetCycle)
-				end)
-				lane.LayoutSideButton:SetScript("OnClick", function()
-					SettingsIntegration:CycleBarLayoutValue(container.id, "anchorSide", anchorSideCycle)
 				end)
 				lane.LayoutGrowthButton:SetScript("OnClick", function()
 					SettingsIntegration:CycleBarLayoutValue(container.id, "growthDirection", growthDirectionCycle)
@@ -1064,11 +1024,6 @@ function SettingsIntegration:BuildOrganizerPanel(panel)
 	panel.OptionsButton:SetPoint("LEFT", panel.SearchBox, "RIGHT", 3, 0)
 	if panel.OptionsButton.SetupMenu then
 		panel.OptionsButton:SetupMenu(function(_owner, rootDescription)
-			rootDescription:CreateButton(addon.Profile:IsLocked() and "Unlock Bars" or "Lock Bars", function()
-				addon.Profile:SetLocked(not addon.Profile:IsLocked())
-				addon.Bars:RefreshRuntime()
-				SettingsIntegration:RefreshPanel()
-			end)
 			rootDescription:CreateButton(addon.Profile:ShowTooltips() and "Hide Runtime Tooltips" or "Show Runtime Tooltips", function()
 				addon.Profile:SetShowTooltips(not addon.Profile:ShowTooltips())
 				SettingsIntegration:RefreshPanel()
@@ -1080,6 +1035,9 @@ function SettingsIntegration:BuildOrganizerPanel(panel)
 					addon.CooldownViewerSkin:RefreshAll()
 				end
 				SettingsIntegration:RefreshPanel()
+			end)
+			rootDescription:CreateButton("Edit Mode", function()
+				OpenBlizzardEditMode()
 			end)
 			rootDescription:CreateDivider()
 			rootDescription:CreateButton("Add Spell by ID", function()
