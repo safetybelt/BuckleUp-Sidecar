@@ -41,6 +41,7 @@ addon.Defaults = {
 			hidePassiveTrinkets = true,
 			locked = false,
 			showTooltips = true,
+			unifiedVisualStyleEnabled = true,
 		},
 	},
 }
@@ -274,6 +275,35 @@ function util.IsKnownPlayerSpell(spellID)
 	return false
 end
 
+function util.IsSpellUsableSafe(spellID)
+	if not spellID then
+		return false
+	end
+
+	local candidateSpellIDs = { spellID }
+	local resolvedSpellID = util.ResolveSpellVariantID(spellID)
+	if resolvedSpellID and resolvedSpellID ~= spellID then
+		candidateSpellIDs[#candidateSpellIDs + 1] = resolvedSpellID
+	end
+
+	for _, candidateSpellID in ipairs(candidateSpellIDs) do
+		if type(C_Spell) == "table" and type(C_Spell.IsSpellUsable) == "function" then
+			local usable, noMana = C_Spell.IsSpellUsable(candidateSpellID)
+			if usable ~= nil then
+				return usable == true and noMana ~= true
+			end
+		end
+		if type(IsUsableSpell) == "function" then
+			local usable, noMana = IsUsableSpell(candidateSpellID)
+			if usable ~= nil then
+				return usable == true and noMana ~= true
+			end
+		end
+	end
+
+	return false
+end
+
 function util.GetInventoryItemName(unit, slotID)
 	local itemID = GetInventoryItemID(unit, slotID)
 	if itemID and C_Item and C_Item.GetItemNameByID then
@@ -381,6 +411,29 @@ function util.IsItemResolvable(itemID)
 	local itemName = util.GetItemNameSafe(itemID)
 	local itemLink = util.GetItemLinkSafe(itemID)
 	return util.DoesItemExistSafe(itemID) and not util.IsPlaceholderItemName(itemName) and itemLink ~= nil
+end
+
+function util.IsItemUsableSafe(itemID)
+	if not itemID then
+		return false
+	end
+
+	if type(C_Item) == "table" and type(C_Item.IsUsableItemByID) == "function" then
+		local usable = C_Item.IsUsableItemByID(itemID)
+		if usable ~= nil then
+			return usable == true
+		end
+	end
+
+	if type(IsUsableItem) == "function" then
+		local itemLink = util.GetItemLinkSafe(itemID)
+		local usable = itemLink and IsUsableItem(itemLink) or IsUsableItem(itemID)
+		if usable ~= nil then
+			return usable == true
+		end
+	end
+
+	return false
 end
 
 function util.ValidateItemIDAsync(itemID, onSuccess, onFailure)

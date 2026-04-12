@@ -2,12 +2,16 @@ local addonName, addonTable = ...
 local addon = addonTable or BuckleUpSidecar
 local util = addon.Util
 local constants = addon.Constants
+local skin = addon.CooldownViewerSkin
+local readiness = addon.Readiness
 
 local Bars = {}
 addon.Bars = Bars
 addon.isDraggingBar = addon.isDraggingBar or {}
 
 local TITLE_COLOR = { 1.0, 0.82, 0.1 }
+local LARGE_COOLDOWN_FONT = "GameFontHighlightHugeOutline"
+local SMALL_COOLDOWN_FONT = "GameFontHighlightOutline"
 
 local function CreateBackdrop(frame)
 	if frame.SetBackdrop then
@@ -106,6 +110,18 @@ local function ResetCooldown(button)
 	button.Cooldown:Hide()
 end
 
+local function ApplyCooldownCountFont(button, iconSize)
+	if not button or not button.Cooldown or type(button.Cooldown.SetCountdownFont) ~= "function" then
+		return
+	end
+
+	if (iconSize or 0) >= 40 then
+		button.Cooldown:SetCountdownFont(LARGE_COOLDOWN_FONT)
+	else
+		button.Cooldown:SetCountdownFont(SMALL_COOLDOWN_FONT)
+	end
+end
+
 local function GetEntryVisual(entry)
 	local catalogEntry = addon.Catalog:GetEntry(entry.id)
 	if not catalogEntry then
@@ -115,6 +131,7 @@ local function GetEntryVisual(entry)
 		name = catalogEntry.name,
 		icon = catalogEntry.icon or constants.FALLBACK_ITEM_ICON,
 		isAvailable = catalogEntry.isAvailable ~= false,
+		isUsable = true,
 		kind = catalogEntry.kind,
 	}
 
@@ -123,11 +140,14 @@ local function GetEntryVisual(entry)
 		info.slotID = catalogEntry.slotID
 		info.hasUseEffect = catalogEntry.hasUseEffect == true
 		info.isAvailable = catalogEntry.itemID ~= nil
+		info.isUsable = readiness and readiness:IsItemReadyForUse(info.itemID, info.slotID) or false
 	elseif entry.kind == "item" then
 		info.itemID = catalogEntry.itemID
+		info.isUsable = readiness and readiness:IsItemReadyForUse(info.itemID, nil) or false
 	elseif entry.kind == "spell" or entry.kind == "racial" then
 		info.spellID = catalogEntry.spellID
 		info.isAvailable = util.IsKnownPlayerSpell(catalogEntry.spellID)
+		info.isUsable = info.isAvailable and readiness and readiness:IsSpellReadyForUse(catalogEntry.spellID) or false
 	end
 
 	return info
@@ -221,8 +241,8 @@ function Bars:CreateButton(parent)
 	if button.Cooldown.SetSwipeTexture then
 		button.Cooldown:SetSwipeTexture("Interface\\HUD\\UI-HUD-CoolDownManager-Icon-Swipe")
 	end
-	if button.Cooldown.SetEdgeTexture then
-		button.Cooldown:SetEdgeTexture("Interface\\Cooldown\\UI-HUD-ActionBar-SecondaryCooldown")
+	if button.Cooldown.SetDrawEdge then
+		button.Cooldown:SetDrawEdge(false)
 	end
 
 	button.Overlay = button:CreateTexture(nil, "OVERLAY")
@@ -372,6 +392,7 @@ function Bars:LayoutBar(barFrame, bar, entries)
 		end
 		button:SetPoint("TOPLEFT", barFrame, "TOPLEFT", offsetX, -4)
 		button:SetSize(iconSize, iconSize)
+		ApplyCooldownCountFont(button, iconSize)
 		button.Overlay:ClearAllPoints()
 		local overlayInset = math.max(5, math.floor(iconSize * 0.18))
 		button.Overlay:SetPoint("TOPLEFT", -overlayInset, overlayInset)
@@ -382,7 +403,8 @@ function Bars:LayoutBar(barFrame, bar, entries)
 		local visual = GetEntryVisual(entry)
 		if visual and visual.isAvailable then
 			button.Icon:SetTexture(visual.icon or constants.FALLBACK_ITEM_ICON)
-			button.Icon:SetDesaturated(false)
+			button.Icon:SetDesaturated(visual.isUsable == false)
+			button.Icon:SetAlpha(visual.isUsable == false and 0.82 or 1)
 			button:SetAlpha(1)
 			if entry.kind == "trinketSlot" then
 				ApplyItemCooldown(button, visual.itemID, visual.slotID)
@@ -391,12 +413,19 @@ function Bars:LayoutBar(barFrame, bar, entries)
 			else
 				ApplySpellCooldown(button, visual.spellID)
 			end
+			if skin then
+				skin:ApplyToRuntimeButton(button, entry, visual)
+			end
 		else
 			button.Icon:SetTexture((visual and visual.icon) or constants.FALLBACK_ITEM_ICON)
 			button.Icon:SetDesaturated(true)
-			button:SetAlpha(0.72)
+			button.Icon:SetAlpha(0.72)
+			button:SetAlpha(1)
 			button.CountText:SetText("")
 			ResetCooldown(button)
+			if skin then
+				skin:ApplyToRuntimeButton(button, entry, visual)
+			end
 		end
 	end
 

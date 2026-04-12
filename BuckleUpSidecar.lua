@@ -57,6 +57,9 @@ local function RefreshAll()
 	addon.Profile:RefreshProfile()
 	addon.Catalog:Rebuild()
 	addon.Bars:RefreshRuntime()
+	if addon.CooldownViewerSkin then
+		addon.CooldownViewerSkin:RefreshAll()
+	end
 	if addon.SettingsIntegration then
 		addon.SettingsIntegration:RefreshPanel()
 	end
@@ -287,8 +290,14 @@ frame:RegisterEvent("BAG_UPDATE_COOLDOWN")
 frame:SetScript("OnEvent", function(_, event, ...)
 	if event == "ADDON_LOADED" then
 		local loadedAddon = select(1, ...)
+		if loadedAddon == addonName and addon.CooldownViewerSkin then
+			addon.CooldownViewerSkin:RefreshAll()
+		end
 		if loadedAddon == "Blizzard_CooldownViewer" and addon.SettingsIntegration then
 			addon.SettingsIntegration:Initialize()
+		end
+		if loadedAddon == "Blizzard_CooldownViewer" and addon.CooldownViewerSkin then
+			addon.CooldownViewerSkin:RefreshAll()
 		end
 		return
 	end

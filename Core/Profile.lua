@@ -118,6 +118,9 @@ function Profile:NormalizeProfile(profile)
 	if normalized.options.showTooltips == nil then
 		normalized.options.showTooltips = true
 	end
+	if normalized.options.unifiedVisualStyleEnabled == nil then
+		normalized.options.unifiedVisualStyleEnabled = true
+	end
 
 	return normalized
 end
@@ -164,6 +167,17 @@ end
 function Profile:SetShowTooltips(showTooltips)
 	local options = self:GetOptions()
 	options.showTooltips = showTooltips ~= false
+	self:CommitProfile()
+	return true
+end
+
+function Profile:IsUnifiedVisualStyleEnabled()
+	return self:GetOptions().unifiedVisualStyleEnabled ~= false
+end
+
+function Profile:SetUnifiedVisualStyleEnabled(enabled)
+	local options = self:GetOptions()
+	options.unifiedVisualStyleEnabled = enabled ~= false
 	self:CommitProfile()
 	return true
 end

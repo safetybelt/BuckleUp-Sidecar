@@ -9,6 +9,8 @@ BuckleUpSidecar.lua
 Core\Shared.lua
 Core\Profile.lua
 Core\Catalog.lua
+BlizzardInterop\CooldownViewerSkin.lua
+Runtime\Readiness.lua
 Runtime\Bars.lua
 UI\SettingsIntegration.lua
 UI\SidecarOrganizer.lua
