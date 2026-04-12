@@ -161,11 +161,33 @@ function SettingsIntegration:SetSidecarTabChecked(checked)
 	end
 end
 
+function SettingsIntegration:IsSidecarPanelActive()
+	return self.panel and self.panel:IsShown() or false
+end
+
+function SettingsIntegration:RefreshSidecarTabVisual()
+	if self.sidecarTab then
+		local isActive = self:IsSidecarPanelActive()
+		ApplySidecarTabTexture(self.sidecarTab, isActive)
+		if self.sidecarTab.SelectedTexture then
+			self.sidecarTab.SelectedTexture:SetShown(isActive)
+		end
+	end
+end
+
+function SettingsIntegration:ClearStaleSidecarTabCheck()
+	if self.sidecarTab and not (self.panel and self.panel:IsShown()) and self.sidecarTab:GetChecked() then
+		self.sidecarTab:SetChecked(false)
+	end
+	self:RefreshSidecarTabVisual()
+end
+
 function SettingsIntegration:HideSidecarPanel()
 	if self.panel then
 		self.panel:Hide()
 	end
 	self:SetSidecarTabChecked(false)
+	self:RefreshSidecarTabVisual()
 end
 
 function SettingsIntegration:ShowSidecarPanel()
@@ -182,6 +204,7 @@ function SettingsIntegration:ShowSidecarPanel()
 	self:HideNativeContent()
 	self:SetupSidecarLayoutDropdown()
 	self.panel:Show()
+	self:RefreshSidecarTabVisual()
 	self:RefreshPanel()
 
 	-- Blizzard's settings panel can reinitialize the shared footer controls during the same
@@ -220,13 +243,14 @@ function SettingsIntegration:CreateSidecarTab()
 
 	ApplySidecarTabTexture(tab, false)
 	tab:HookScript("OnShow", function(selfButton)
-		ApplySidecarTabTexture(selfButton, selfButton:GetChecked())
+		SettingsIntegration:ClearStaleSidecarTabCheck()
+		SettingsIntegration:RefreshSidecarTabVisual()
 	end)
 	tab:HookScript("OnMouseDown", function(selfButton)
-		ApplySidecarTabTexture(selfButton, selfButton:GetChecked())
+		SettingsIntegration:RefreshSidecarTabVisual()
 	end)
 	tab:HookScript("OnMouseUp", function(selfButton)
-		ApplySidecarTabTexture(selfButton, selfButton:GetChecked())
+		SettingsIntegration:RefreshSidecarTabVisual()
 	end)
 	tab:SetScript("OnEnter", function(selfButton)
 		GameTooltip:SetOwner(selfButton, "ANCHOR_RIGHT")
@@ -289,12 +313,16 @@ function SettingsIntegration:Initialize()
 			self:ShowNativeContent()
 		end
 		if settingsFrame == self:GetSettingsFrame() then
-			self:SetSidecarTabChecked(false)
+			self:ClearStaleSidecarTabCheck()
 		end
 	end)
 
 	EventRegistry:RegisterCallback("CooldownViewerSettings.OnShow", function()
 		self:EnsureUI()
+		self:ClearStaleSidecarTabCheck()
+		C_Timer.After(0, function()
+			self:ClearStaleSidecarTabCheck()
+		end)
 		self:RefreshPanel()
 	end)
 end
