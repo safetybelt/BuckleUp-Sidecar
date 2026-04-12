@@ -1,18 +1,8 @@
 local addonName, addonTable = ...
 local addon = addonTable or BuckleUpSidecar
-local util = addon.Util
-local constants = addon.Constants
 
 local EditMode = {}
 addon.EditMode = EditMode
-
-local SIDECAR_EDIT_MODE_SYSTEM_BASE = 9100
-local CENTER_ALIGNMENT_TARGETS = {
-	EssentialCooldownViewer = true,
-	UtilityCooldownViewer = true,
-	BuffIconCooldownViewer = true,
-	BuffBarCooldownViewer = true,
-}
 
 local function EnsureEditModeLoaded()
 	if EditModeManagerFrame then
@@ -26,226 +16,73 @@ local function EnsureEditModeLoaded()
 	return EditModeManagerFrame ~= nil
 end
 
-local function ResolveRelativeFrame(frameName)
-	if not frameName or frameName == "" or frameName == "UIParent" then
-		return UIParent
-	end
-
-	return _G[frameName] or UIParent
-end
-
-local function GetPointFrameName(frame)
-	return frame and frame.GetName and frame:GetName() or nil
-end
-
-local function IsCenterAlignmentTarget(frame)
-	local frameName = GetPointFrameName(frame)
-	return frameName and CENTER_ALIGNMENT_TARGETS[frameName] == true
-end
-
-local function EnsureSelectionFrame(barFrame)
-	if barFrame.Selection then
-		return barFrame.Selection
-	end
-
-	local selection = CreateFrame("Frame", nil, barFrame, "EditModeSystemSelectionTemplate")
-	selection:ClearAllPoints()
-	selection:SetAllPoints(barFrame)
-	selection:SetFrameStrata("TOOLTIP")
-	selection:SetFrameLevel(barFrame:GetFrameLevel() + 10)
-	selection:EnableMouse(false)
-	selection:SetSystem(barFrame)
-	selection:Hide()
-
-	barFrame.Selection = selection
-	return selection
-end
-
-local function UpdateMagnetismRegistration(barFrame)
-	if not barFrame or not EditModeMagnetismManager then
-		return
-	end
-
-	if barFrame:IsVisible() and barFrame.isEditModeActive and barFrame.isHighlighted and not barFrame.isSelected then
-		EditModeMagnetismManager:RegisterFrame(barFrame)
-	else
-		EditModeMagnetismManager:UnregisterFrame(barFrame)
-	end
-end
-
-local function HighlightBarFrame(barFrame)
-	local selection = EnsureSelectionFrame(barFrame)
-	barFrame:SetMovable(false)
-	barFrame:AnchorSelectionFrame()
-	selection:ShowHighlighted()
-	barFrame.isHighlighted = true
-	barFrame.isSelected = false
-	UpdateMagnetismRegistration(barFrame)
-end
-
-local function ClearBarSelection(barFrame)
-	if not barFrame then
-		return
-	end
-
-	local selection = EnsureSelectionFrame(barFrame)
-	selection:Hide()
-	barFrame.isHighlighted = false
-	barFrame.isSelected = false
-	barFrame.isDragging = false
-	barFrame:SetMovable(false)
-	UpdateMagnetismRegistration(barFrame)
-end
-
 function EditMode:IsActive()
 	return EditModeManagerFrame and EditModeManagerFrame.IsEditModeActive and EditModeManagerFrame:IsEditModeActive() or false
 end
 
 function EditMode:CanBarBeDragged(barID)
+	if addon.EditModePlacement then
+		return addon.EditModePlacement:CanBarBeDragged(barID)
+	end
+
 	return self:IsActive()
 end
 
 function EditMode:ApplyBarAnchor(barFrame, bar)
-	if not barFrame or not bar then
-		return
-	end
-
-	barFrame:ClearAllPoints()
-	if bar.relativeTo then
-		barFrame:SetPoint(
-			bar.point or "CENTER",
-			ResolveRelativeFrame(bar.relativeTo),
-			bar.relativePoint or bar.point or "CENTER",
-			bar.x or 0,
-			bar.y or 0
-		)
+	if addon.EditModePlacement then
+		addon.EditModePlacement:ApplyBarAnchor(barFrame, bar)
 	end
 end
 
 function EditMode:SaveBarAnchor(barID, barFrame)
-	local bar = addon.Profile and addon.Profile:GetBarByID(barID)
-	if not bar or not barFrame or not barFrame.GetPoint then
-		return
+	if addon.EditModePlacement then
+		addon.EditModePlacement:SaveBarAnchor(barID, barFrame)
 	end
-
-	local point, relativeTo, relativePoint, offsetX, offsetY = barFrame:GetPoint(1)
-	if not point then
-		return
-	end
-
-	local snappedToFrame = barFrame.snappedToFrame
-	if (not relativeTo or relativeTo == UIParent) and snappedToFrame then
-		relativeTo = snappedToFrame
-	end
-
-	local relativeToName = relativeTo and relativeTo.GetName and relativeTo:GetName() or "UIParent"
-	local layout = {
-		point = point,
-		relativePoint = relativePoint,
-		relativeTo = relativeToName,
-		x = util.NumberOrNil(offsetX) or 0,
-		y = util.NumberOrNil(offsetY) or 0,
-	}
-
-	addon.Profile:UpdateBarLayout(barID, layout)
 end
 
 function EditMode:ApplyKnownTargetAlignment(barFrame)
-	if not barFrame or not barFrame.GetPoint then
-		return
+	if addon.EditModePlacement then
+		addon.EditModePlacement:ApplyKnownTargetAlignment(barFrame)
 	end
+end
 
-	local point, relativeTo, relativePoint, offsetX, offsetY = barFrame:GetPoint(1)
-	if not point then
-		return
+function EditMode:ReapplyBarAnchor(barFrame, barID)
+	if addon.EditModePlacement then
+		addon.EditModePlacement:ReapplyStoredAnchor(barFrame, barID)
 	end
-
-	if (not relativeTo or relativeTo == UIParent) and barFrame.snappedToFrame then
-		relativeTo = barFrame.snappedToFrame
-	end
-
-	if not IsCenterAlignmentTarget(relativeTo) then
-		return
-	end
-
-	local adjustedX = offsetX or 0
-	local adjustedY = offsetY or 0
-	if (point == "LEFT" and relativePoint == "RIGHT") or (point == "RIGHT" and relativePoint == "LEFT") then
-		adjustedY = 0
-	elseif (point == "TOP" and relativePoint == "BOTTOM") or (point == "BOTTOM" and relativePoint == "TOP") then
-		adjustedX = 0
-	elseif point == "CENTER" and relativePoint == "CENTER" then
-		adjustedX = 0
-		adjustedY = 0
-	else
-		return
-	end
-
-	if adjustedX == offsetX and adjustedY == offsetY then
-		return
-	end
-
-	barFrame:ClearAllPoints()
-	barFrame:SetPoint(point, relativeTo, relativePoint, adjustedX, adjustedY)
 end
 
 function EditMode:SelectBarFrame(barFrame)
-	if not barFrame then
-		return
+	if addon.EditModeSelection then
+		addon.EditModeSelection:SelectBarFrame(barFrame)
 	end
+end
 
-	if EditModeManagerFrame and EditModeManagerFrame.ClearSelectedSystem then
-		EditModeManagerFrame:ClearSelectedSystem()
+function EditMode:ClearSelectedBarFrame(keepPanelOpen)
+	if addon.EditModeSelection then
+		addon.EditModeSelection:ClearSelectedBarFrameSelection(keepPanelOpen)
 	end
+end
 
-	if self.selectedBarFrame and self.selectedBarFrame ~= barFrame then
-		HighlightBarFrame(self.selectedBarFrame)
+function EditMode:ShowPanelForBar(barFrame)
+	if addon.EditModeSelection then
+		addon.EditModeSelection:ShowPanelForBar(barFrame)
 	end
+end
 
-	local selection = EnsureSelectionFrame(barFrame)
-	barFrame:SetMovable(true)
-	barFrame:AnchorSelectionFrame()
-	selection:ShowSelected()
-	barFrame.isHighlighted = true
-	barFrame.isSelected = true
-	self.selectedBarFrame = barFrame
-	UpdateMagnetismRegistration(barFrame)
+function EditMode:HidePanel()
+	if addon.EditModeSelection then
+		addon.EditModeSelection:HidePanel()
+	end
 end
 
 function EditMode:AttachBarFrame(barFrame)
-	if not barFrame or barFrame.sidecarEditModeAttached then
-		return
+	if addon.EditModePlacement then
+		addon.EditModePlacement:AttachBarFrame(barFrame)
 	end
 
-	if not EnsureEditModeLoaded() or not EditModeSystemMixin then
-		return
-	end
-
-	-- This is intentionally a narrow compatibility shim, not a full Blizzard-owned
-	-- Edit Mode system. We borrow the mixin's snap bookkeeping overrides so Sidecar
-	-- bars can participate in native magnetism, but Sidecar still owns placement
-	-- persistence and does not register as a real Blizzard Edit Mode system.
-	Mixin(barFrame, EditModeSystemMixin)
-	if not barFrame.SetPointBase then
-		barFrame.SetPointBase = barFrame.SetPoint
-		barFrame.SetPoint = barFrame.SetPointOverride
-	end
-	if not barFrame.ClearAllPointsBase then
-		barFrame.ClearAllPointsBase = barFrame.ClearAllPoints
-		barFrame.ClearAllPoints = barFrame.ClearAllPointsOverride
-	end
-	barFrame.snappedFrames = barFrame.snappedFrames or {}
-	barFrame.system = SIDECAR_EDIT_MODE_SYSTEM_BASE + (tonumber(tostring(barFrame.barID):match("(%d+)")) or 0)
-	barFrame.systemNameString = "Sidecar"
-
-	function barFrame:GetSystemName()
-		return self.systemNameString
-	end
-
-	EnsureSelectionFrame(barFrame)
-	barFrame.sidecarEditModeAttached = true
-	if self:IsActive() then
-		self:RefreshBarFrame(barFrame)
+	if addon.EditModeSelection then
+		addon.EditModeSelection:EnsureSelectionFrame(barFrame)
 	end
 end
 
@@ -255,18 +92,8 @@ function EditMode:RefreshBarFrame(barFrame)
 	end
 
 	self:AttachBarFrame(barFrame)
-	if self:IsActive() then
-		barFrame.isEditModeActive = true
-		HighlightBarFrame(barFrame)
-	else
-		barFrame.isEditModeActive = false
-		if barFrame.Selection then
-			barFrame.Selection:Hide()
-		end
-		barFrame.isHighlighted = false
-		barFrame.isSelected = false
-		barFrame.isDragging = false
-		UpdateMagnetismRegistration(barFrame)
+	if addon.EditModeSelection then
+		addon.EditModeSelection:RefreshBarFrame(barFrame, self:IsActive())
 	end
 end
 
@@ -279,10 +106,13 @@ function EditMode:OnEditModeEnter()
 	for _, barFrame in pairs(addon.barFrames) do
 		if barFrame:IsShown() then
 			self:AttachBarFrame(barFrame)
-			barFrame.isEditModeActive = true
-			HighlightBarFrame(barFrame)
+			if addon.EditModeSelection then
+				addon.EditModeSelection:RefreshBarFrame(barFrame, true)
+			end
 		end
 	end
+
+	self:HidePanel()
 	if addon.Bars then
 		addon.Bars:RefreshRuntime()
 	end
@@ -298,8 +128,11 @@ function EditMode:OnEditModeExit()
 			barFrame:StopMovingOrSizing()
 			barFrame.isDragging = false
 		end
+
+		if addon.EditModeSelection then
+			addon.EditModeSelection:ClearBarSelection(barFrame)
+		end
 		barFrame.isEditModeActive = false
-		ClearBarSelection(barFrame)
 		self:SaveBarAnchor(barFrame.barID, barFrame)
 	end
 
@@ -308,8 +141,15 @@ function EditMode:OnEditModeExit()
 	end
 
 	self.selectedBarFrame = nil
+	self:HidePanel()
 	if addon.Bars then
 		addon.Bars:RefreshRuntime()
+	end
+end
+
+function EditMode:HandleExternalSelectionChange(selectedSystem)
+	if addon.EditModeSelection then
+		addon.EditModeSelection:HandleExternalSelectionChange(selectedSystem)
 	end
 end
 
@@ -330,6 +170,20 @@ function EditMode:Initialize()
 			EditMode:OnEditModeExit()
 		end, self)
 		self.callbacksRegistered = true
+	end
+
+	if not self.selectionHooksInstalled and hooksecurefunc and EditModeManagerFrame then
+		if type(EditModeManagerFrame.SelectSystem) == "function" then
+			hooksecurefunc(EditModeManagerFrame, "SelectSystem", function(manager, selectedSystem)
+				EditMode:HandleExternalSelectionChange(selectedSystem or manager.selectedSystem)
+			end)
+		end
+		if type(EditModeManagerFrame.ClearSelectedSystem) == "function" then
+			hooksecurefunc(EditModeManagerFrame, "ClearSelectedSystem", function(manager)
+				EditMode:HandleExternalSelectionChange(manager and manager.selectedSystem)
+			end)
+		end
+		self.selectionHooksInstalled = true
 	end
 
 	self.initialized = true

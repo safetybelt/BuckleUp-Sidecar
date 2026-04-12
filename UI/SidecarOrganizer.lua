@@ -9,25 +9,6 @@ local TILE_GAP = 8
 local LANE_PADDING = 10
 local MIN_LANE_HEIGHT = 78
 local modifiedItemHookInstalled = false
-local growthDirectionCycle = {
-	addon.Constants.GROWTH_LEFT,
-	addon.Constants.GROWTH_CENTER,
-	addon.Constants.GROWTH_RIGHT,
-}
-local growthDirectionLabel = {
-	[addon.Constants.GROWTH_LEFT] = "Left",
-	[addon.Constants.GROWTH_CENTER] = "Center",
-	[addon.Constants.GROWTH_RIGHT] = "Right",
-}
-
-local function GetNextCycleValue(cycle, currentValue)
-	for index, value in ipairs(cycle) do
-		if value == currentValue then
-			return cycle[(index % #cycle) + 1]
-		end
-	end
-	return cycle[1]
-end
 
 local function EnsureEntry(entryID)
 	local catalogEntry = addon.Catalog:GetEntry(entryID)
@@ -210,15 +191,13 @@ local function UpdateLaneActionVisibility(lane)
 		return
 	end
 
-	local isHovering = MouseIsOver(lane.Header) or MouseIsOver(lane.RenameButton) or MouseIsOver(lane.DeleteButton) or MouseIsOver(lane.LayoutButton)
+	local isHovering = MouseIsOver(lane.Header) or MouseIsOver(lane.RenameButton) or MouseIsOver(lane.DeleteButton)
 	if isHovering then
 		lane.RenameButton:Show()
 		lane.DeleteButton:Show()
-		lane.LayoutButton:Show()
 	else
 		lane.RenameButton:Hide()
 		lane.DeleteButton:Hide()
-		lane.LayoutButton:Hide()
 	end
 end
 
@@ -526,101 +505,6 @@ function SettingsIntegration:CreateLane(parent)
 		lane.DeleteButton.Text:SetTextColor(0.72, 0.72, 0.72)
 	end)
 
-	lane.LayoutButton = CreateFrame("Button", nil, lane.Header)
-	lane.LayoutButton:SetSize(40, 16)
-	lane.LayoutButton.Text = lane.LayoutButton:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	lane.LayoutButton.Text:SetAllPoints()
-	lane.LayoutButton.Text:SetJustifyH("CENTER")
-	lane.LayoutButton.Text:SetText("Layout")
-	lane.LayoutButton.Text:SetTextColor(0.72, 0.72, 0.72)
-	lane.LayoutButton:Hide()
-	lane.LayoutButton:SetScript("OnEnter", function()
-		UpdateLaneActionVisibility(lane)
-		lane.LayoutButton.Text:SetTextColor(1, 0.82, 0)
-	end)
-	lane.LayoutButton:SetScript("OnLeave", function()
-		C_Timer.After(0, function()
-			UpdateLaneActionVisibility(lane)
-		end)
-		lane.LayoutButton.Text:SetTextColor(0.72, 0.72, 0.72)
-	end)
-
-	lane.LayoutEditor = CreateFrame("Frame", nil, lane, "BackdropTemplate")
-	lane.LayoutEditor:SetHeight(42)
-	lane.LayoutEditor:SetPoint("TOPLEFT", lane.Header, "BOTTOMLEFT", 6, -6)
-	lane.LayoutEditor:SetPoint("TOPRIGHT", lane.Header, "BOTTOMRIGHT", -6, -6)
-	lane.LayoutEditor:SetBackdrop({
-		bgFile = "Interface\\Buttons\\WHITE8x8",
-		edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-		edgeSize = 10,
-		insets = { left = 2, right = 2, top = 2, bottom = 2 },
-	})
-	lane.LayoutEditor:SetBackdropColor(0.08, 0.08, 0.08, 0.92)
-	lane.LayoutEditor:SetBackdropBorderColor(0.26, 0.26, 0.26, 0.92)
-	lane.LayoutEditor:Hide()
-
-	lane.LayoutSizeLabel = lane.LayoutEditor:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	lane.LayoutSizeLabel:SetPoint("TOPLEFT", lane.LayoutEditor, "TOPLEFT", 14, -14)
-	lane.LayoutSizeLabel:SetTextColor(0.82, 0.82, 0.82)
-	lane.LayoutSizeLabel:SetText("Size")
-
-	lane.LayoutSizeDown = CreateFrame("Button", nil, lane.LayoutEditor)
-	lane.LayoutSizeDown:SetSize(18, 18)
-	lane.LayoutSizeDown:SetPoint("LEFT", lane.LayoutSizeLabel, "RIGHT", 10, 0)
-	lane.LayoutSizeDown.Text = lane.LayoutSizeDown:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	lane.LayoutSizeDown.Text:SetAllPoints()
-	lane.LayoutSizeDown.Text:SetText("-")
-
-	lane.LayoutSizeValue = lane.LayoutEditor:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	lane.LayoutSizeValue:SetPoint("LEFT", lane.LayoutSizeDown, "RIGHT", 8, 0)
-	lane.LayoutSizeValue:SetWidth(30)
-	lane.LayoutSizeValue:SetJustifyH("CENTER")
-	lane.LayoutSizeValue:SetTextColor(1, 0.82, 0)
-
-	lane.LayoutSizeUp = CreateFrame("Button", nil, lane.LayoutEditor)
-	lane.LayoutSizeUp:SetSize(18, 18)
-	lane.LayoutSizeUp:SetPoint("LEFT", lane.LayoutSizeValue, "RIGHT", 8, 0)
-	lane.LayoutSizeUp.Text = lane.LayoutSizeUp:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	lane.LayoutSizeUp.Text:SetAllPoints()
-	lane.LayoutSizeUp.Text:SetText("+")
-
-	lane.LayoutSpacingLabel = lane.LayoutEditor:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	lane.LayoutSpacingLabel:SetPoint("TOPLEFT", lane.LayoutEditor, "TOPLEFT", 154, -14)
-	lane.LayoutSpacingLabel:SetTextColor(0.82, 0.82, 0.82)
-	lane.LayoutSpacingLabel:SetText("Spacing")
-
-	lane.LayoutSpacingDown = CreateFrame("Button", nil, lane.LayoutEditor)
-	lane.LayoutSpacingDown:SetSize(18, 18)
-	lane.LayoutSpacingDown:SetPoint("LEFT", lane.LayoutSpacingLabel, "RIGHT", 10, 0)
-	lane.LayoutSpacingDown.Text = lane.LayoutSpacingDown:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	lane.LayoutSpacingDown.Text:SetAllPoints()
-	lane.LayoutSpacingDown.Text:SetText("-")
-
-	lane.LayoutSpacingValue = lane.LayoutEditor:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	lane.LayoutSpacingValue:SetPoint("LEFT", lane.LayoutSpacingDown, "RIGHT", 8, 0)
-	lane.LayoutSpacingValue:SetWidth(28)
-	lane.LayoutSpacingValue:SetJustifyH("CENTER")
-	lane.LayoutSpacingValue:SetTextColor(1, 0.82, 0)
-
-	lane.LayoutSpacingUp = CreateFrame("Button", nil, lane.LayoutEditor)
-	lane.LayoutSpacingUp:SetSize(18, 18)
-	lane.LayoutSpacingUp:SetPoint("LEFT", lane.LayoutSpacingValue, "RIGHT", 8, 0)
-	lane.LayoutSpacingUp.Text = lane.LayoutSpacingUp:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	lane.LayoutSpacingUp.Text:SetAllPoints()
-	lane.LayoutSpacingUp.Text:SetText("+")
-
-	lane.LayoutGrowthLabel = lane.LayoutEditor:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	lane.LayoutGrowthLabel:SetPoint("TOPLEFT", lane.LayoutEditor, "TOPLEFT", 306, -14)
-	lane.LayoutGrowthLabel:SetTextColor(0.82, 0.82, 0.82)
-	lane.LayoutGrowthLabel:SetText("Grow")
-
-	lane.LayoutGrowthButton = CreateFrame("Button", nil, lane.LayoutEditor)
-	lane.LayoutGrowthButton:SetSize(52, 18)
-	lane.LayoutGrowthButton:SetPoint("LEFT", lane.LayoutGrowthLabel, "RIGHT", 10, 0)
-	lane.LayoutGrowthButton.Text = lane.LayoutGrowthButton:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	lane.LayoutGrowthButton.Text:SetAllPoints()
-	lane.LayoutGrowthButton.Text:SetJustifyH("CENTER")
-
 	lane.NameEditor = CreateFrame("EditBox", nil, lane, "InputBoxTemplate")
 	lane.NameEditor:SetSize(150, 20)
 	lane.NameEditor:SetAutoFocus(false)
@@ -702,46 +586,7 @@ function SettingsIntegration:LayoutLane(lane, entries)
 	end
 
 	local rows = math.max(1, math.floor((#entries - 1) / columns) + 1)
-	local layoutExtra = lane.layoutExpanded and 54 or 0
-	lane:SetHeight(math.max(MIN_LANE_HEIGHT, 30 + layoutExtra + (rows * TILE_SIZE) + ((rows - 1) * TILE_GAP) + 6))
-end
-
-function SettingsIntegration:AdjustBarLayout(barID, field, delta, minValue, maxValue)
-	local bar = addon.Profile:GetBarByID(barID)
-	if not bar then
-		return
-	end
-
-	local currentValue = bar[field] or 0
-	local nextValue = math.min(maxValue, math.max(minValue, currentValue + delta))
-	if nextValue == currentValue then
-		return
-	end
-
-	addon.Profile:UpdateBarLayout(barID, { [field] = nextValue })
-	addon.Bars:RefreshRuntime()
-	self:RefreshPanel()
-end
-
-function SettingsIntegration:CycleBarLayoutValue(barID, field, cycle)
-	local bar = addon.Profile:GetBarByID(barID)
-	if not bar then
-		return
-	end
-
-	local nextValue = GetNextCycleValue(cycle, bar[field])
-	addon.Profile:UpdateBarLayout(barID, { [field] = nextValue })
-	addon.Bars:RefreshRuntime()
-	self:RefreshPanel()
-end
-
-function SettingsIntegration:ToggleLayoutEditor(barID)
-	if self.expandedLayoutBarID == barID then
-		self.expandedLayoutBarID = nil
-	else
-		self.expandedLayoutBarID = barID
-	end
-	self:RefreshPanel()
+	lane:SetHeight(math.max(MIN_LANE_HEIGHT, 30 + (rows * TILE_SIZE) + ((rows - 1) * TILE_GAP) + 6))
 end
 
 function SettingsIntegration:RefreshLanes()
@@ -780,22 +625,17 @@ function SettingsIntegration:RefreshLanes()
 		lane.Title:SetText(container.label)
 		lane.Count:SetText(string.format("%d entries", #entries))
 		lane.NameEditor.lane = lane
-		lane.layoutExpanded = self.expandedLayoutBarID == container.id
 		lane.NameEditor:ClearAllPoints()
 		lane.NameEditor:SetPoint("TOPLEFT", lane.Header, "TOPLEFT", 8, -2)
 		lane.RenameButton:ClearAllPoints()
 		lane.DeleteButton:ClearAllPoints()
-		lane.LayoutButton:ClearAllPoints()
 		lane.DeleteButton:SetPoint("RIGHT", lane.Header, "RIGHT", -12, 0)
-		lane.LayoutButton:SetPoint("RIGHT", lane.DeleteButton, "LEFT", -8, 0)
-		lane.RenameButton:SetPoint("RIGHT", lane.LayoutButton, "LEFT", -8, 0)
+		lane.RenameButton:SetPoint("RIGHT", lane.DeleteButton, "LEFT", -8, 0)
 		lane.Count:ClearAllPoints()
 		lane.showActions = container.id ~= addon.Constants.HIDDEN_CONTAINER_ID
 		if container.id == addon.Constants.HIDDEN_CONTAINER_ID then
 			lane.RenameButton:Hide()
 			lane.DeleteButton:Hide()
-			lane.LayoutButton:Hide()
-			lane.LayoutEditor:Hide()
 			lane.NameEditor:Hide()
 			lane.Title:Show()
 			lane.Count:SetPoint("RIGHT", lane.Header, "RIGHT", -10, 0)
@@ -803,7 +643,6 @@ function SettingsIntegration:RefreshLanes()
 		else
 			lane.RenameButton:Hide()
 			lane.DeleteButton:Hide()
-			lane.LayoutButton:Hide()
 			lane.Count:SetPoint("RIGHT", lane.Header, "RIGHT", -10, 0)
 			lane.Count:SetText("")
 			lane.RenameButton:SetScript("OnClick", function()
@@ -836,33 +675,6 @@ function SettingsIntegration:RefreshLanes()
 					popup.barID = container.id
 				end
 			end)
-			lane.LayoutButton:SetScript("OnClick", function(self)
-				SettingsIntegration:ToggleLayoutEditor(container.id)
-			end)
-			local currentBar = addon.Profile:GetBarByID(container.id)
-			if lane.layoutExpanded and currentBar then
-				lane.LayoutEditor:Show()
-				lane.LayoutSizeValue:SetText(tostring(currentBar.iconSize or 40))
-				lane.LayoutSpacingValue:SetText(tostring(currentBar.spacing or 6))
-				lane.LayoutGrowthButton.Text:SetText(growthDirectionLabel[currentBar.growthDirection] or "Right")
-				lane.LayoutSizeDown:SetScript("OnClick", function()
-					SettingsIntegration:AdjustBarLayout(container.id, "iconSize", -2, 24, 72)
-				end)
-				lane.LayoutSizeUp:SetScript("OnClick", function()
-					SettingsIntegration:AdjustBarLayout(container.id, "iconSize", 2, 24, 72)
-				end)
-				lane.LayoutSpacingDown:SetScript("OnClick", function()
-					SettingsIntegration:AdjustBarLayout(container.id, "spacing", -1, 0, 24)
-				end)
-				lane.LayoutSpacingUp:SetScript("OnClick", function()
-					SettingsIntegration:AdjustBarLayout(container.id, "spacing", 1, 0, 24)
-				end)
-				lane.LayoutGrowthButton:SetScript("OnClick", function()
-					SettingsIntegration:CycleBarLayoutValue(container.id, "growthDirection", growthDirectionCycle)
-				end)
-			else
-				lane.LayoutEditor:Hide()
-			end
 		end
 		self:LayoutLane(lane, entries)
 		lane:Show()

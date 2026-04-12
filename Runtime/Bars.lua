@@ -10,9 +10,9 @@ local Bars = {}
 addon.Bars = Bars
 addon.isDraggingBar = addon.isDraggingBar or {}
 
-local TITLE_COLOR = { 1.0, 0.82, 0.1 }
 local LARGE_COOLDOWN_FONT = "GameFontHighlightHugeOutline"
 local SMALL_COOLDOWN_FONT = "GameFontHighlightOutline"
+local BAR_PADDING = constants.BAR_PADDING or 4
 
 local function CreateBackdrop(frame)
 	if frame.SetBackdrop then
@@ -190,6 +190,15 @@ function Bars:CreateButton(parent)
 	button.CountText:SetShadowOffset(1, -1)
 
 	button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+	button:SetScript("OnMouseDown", function(self, buttonName)
+		if buttonName ~= "LeftButton" then
+			return
+		end
+		local parent = self:GetParent()
+		if parent and editMode and editMode:IsActive() then
+			editMode:SelectBarFrame(parent)
+		end
+	end)
 	button:SetScript("OnEnter", function(self)
 		if not addon.Profile:ShowTooltips() then
 			return
@@ -270,6 +279,7 @@ end
 function Bars:CreateBarFrame(bar)
 	local frame = CreateFrame("Frame", "BuckleUpSidecarBar_" .. bar.id, UIParent, "BackdropTemplate")
 	frame.barID = bar.id
+	frame.isSidecarBarFrame = true
 	frame.buttons = {}
 	frame:SetClampedToScreen(true)
 	frame:SetMovable(false)
@@ -313,12 +323,6 @@ function Bars:CreateBarFrame(bar)
 		end
 	end)
 
-	frame.Title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-	frame.Title:SetPoint("BOTTOMLEFT", frame, "TOPLEFT", 4, 3)
-	frame.Title:SetTextColor(unpack(TITLE_COLOR))
-	frame.Title:SetShadowOffset(1, -1)
-	frame.Title:SetText(bar.name)
-
 	CreateBackdrop(frame)
 	return frame
 end
@@ -339,8 +343,6 @@ function Bars:EnsureBarFrames()
 		if not addon.isDraggingBar[bar.id] then
 			ApplyStoredBarPlacement(frame, bar)
 		end
-		frame.Title:SetText(bar.name)
-		frame.Title:SetShown(editMode and editMode:IsActive())
 		frame:SetMovable(CanDragBarFrame(bar.id))
 		frame:EnableMouse(editMode and editMode:IsActive())
 		frame:Show()
@@ -361,22 +363,22 @@ function Bars:LayoutBar(barFrame, bar, entries)
 	local spacing = bar.spacing or 6
 	local growthDirection = bar.growthDirection or constants.GROWTH_RIGHT
 	local contentWidth = #entries > 0 and ((#entries * iconSize) + ((#entries - 1) * spacing)) or iconSize
-	local width = contentWidth + 8
-	local height = iconSize + 8
+	local width = contentWidth + (BAR_PADDING * 2)
+	local height = iconSize + (BAR_PADDING * 2)
 
 	for index, entry in ipairs(entries) do
 		local button = self:AcquireButton(barFrame, index)
 		button:ClearAllPoints()
 		local offsetX
 		if growthDirection == constants.GROWTH_LEFT then
-			offsetX = 4 + ((#entries - index) * (iconSize + spacing))
+			offsetX = BAR_PADDING + ((#entries - index) * (iconSize + spacing))
 		elseif growthDirection == constants.GROWTH_CENTER then
-			local startX = math.floor((width - contentWidth) / 2) + 4
+			local startX = math.floor((width - contentWidth) / 2)
 			offsetX = startX + ((index - 1) * (iconSize + spacing))
 		else
-			offsetX = 4 + ((index - 1) * (iconSize + spacing))
+			offsetX = BAR_PADDING + ((index - 1) * (iconSize + spacing))
 		end
-		button:SetPoint("TOPLEFT", barFrame, "TOPLEFT", offsetX, -4)
+		button:SetPoint("TOPLEFT", barFrame, "TOPLEFT", offsetX, -BAR_PADDING)
 		button:SetSize(iconSize, iconSize)
 		ApplyCooldownCountFont(button, iconSize)
 		button.Overlay:ClearAllPoints()
@@ -440,5 +442,12 @@ function Bars:RefreshRuntime()
 			end
 		end
 		self:LayoutBar(frame, bar, visibleEntries)
+		if editMode then
+			editMode:ReapplyBarAnchor(frame, bar.id)
+		end
+	end
+
+	if addon.EditModePanel then
+		addon.EditModePanel:Refresh()
 	end
 end

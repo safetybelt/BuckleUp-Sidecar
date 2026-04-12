@@ -6,6 +6,7 @@ addon.Constants = {
 	HIDDEN_CONTAINER_ID = "hidden",
 	DEFAULT_BAR_ID = "bar1",
 	FALLBACK_ITEM_ICON = 134400,
+	BAR_PADDING = 4,
 	GROWTH_LEFT = "left",
 	GROWTH_CENTER = "center",
 	GROWTH_RIGHT = "right",
