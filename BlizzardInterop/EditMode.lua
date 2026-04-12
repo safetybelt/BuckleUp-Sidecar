@@ -48,18 +48,13 @@ local function EnsureSelectionFrame(barFrame)
 		return barFrame.Selection
 	end
 
-	local selection = CreateFrame("Frame", nil, barFrame, "BackdropTemplate")
-	selection:SetPoint("TOPLEFT", barFrame, "TOPLEFT", -4, 4)
-	selection:SetPoint("BOTTOMRIGHT", barFrame, "BOTTOMRIGHT", 4, -4)
+	local selection = CreateFrame("Frame", nil, barFrame, "EditModeSystemSelectionTemplate")
+	selection:ClearAllPoints()
+	selection:SetAllPoints(barFrame)
 	selection:SetFrameStrata("TOOLTIP")
 	selection:SetFrameLevel(barFrame:GetFrameLevel() + 10)
-	selection:SetBackdrop({
-		bgFile = "Interface\\Buttons\\WHITE8X8",
-		edgeFile = "Interface\\Buttons\\WHITE8X8",
-		edgeSize = 2,
-		insets = { left = 0, right = 0, top = 0, bottom = 0 },
-	})
-	selection:SetBackdropColor(0, 0, 0, 0)
+	selection:EnableMouse(false)
+	selection:SetSystem(barFrame)
 	selection:Hide()
 
 	barFrame.Selection = selection
@@ -81,8 +76,8 @@ end
 local function HighlightBarFrame(barFrame)
 	local selection = EnsureSelectionFrame(barFrame)
 	barFrame:SetMovable(false)
-	selection:Show()
-	selection:SetBackdropBorderColor(0.95, 0.82, 0.25, 0.95)
+	barFrame:AnchorSelectionFrame()
+	selection:ShowHighlighted()
 	barFrame.isHighlighted = true
 	barFrame.isSelected = false
 	UpdateMagnetismRegistration(barFrame)
@@ -209,8 +204,8 @@ function EditMode:SelectBarFrame(barFrame)
 
 	local selection = EnsureSelectionFrame(barFrame)
 	barFrame:SetMovable(true)
-	selection:Show()
-	selection:SetBackdropBorderColor(0.35, 0.82, 0.95, 0.95)
+	barFrame:AnchorSelectionFrame()
+	selection:ShowSelected()
 	barFrame.isHighlighted = true
 	barFrame.isSelected = true
 	self.selectedBarFrame = barFrame
