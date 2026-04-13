@@ -24,11 +24,16 @@ local DEFAULT_VIEWER_MASK_ATLAS = "UI-HUD-CoolDownManager-Mask"
 local COOLDOWN_VIEWER_FRAME_NAMES = {
 	"EssentialCooldownViewer",
 	"UtilityCooldownViewer",
+	"BuffIconCooldownViewer",
+	"BuffBarCooldownViewer",
 }
 
 local SetBorderColor
 local viewerStyleDataByFrame = setmetatable({}, { __mode = "k" })
 local pandemicStateByFrame = setmetatable({}, { __mode = "k" })
+-- Tracked buff icon/bar viewers have a different live item structure than Essential/Utility,
+-- so their extra cleanup and hooks live in a dedicated helper module.
+local trackedBuffSkin = addon.TrackedBuffViewerSkin
 
 local function SafeCall(methodOwner, methodName, ...)
 	if not methodOwner then
@@ -341,13 +346,24 @@ local function ResolveCooldownViewerIconParts(itemFrame)
 	return nil, nil
 end
 
+local function GetViewerName(viewer)
+	return viewer and type(viewer.GetName) == "function" and viewer:GetName() or nil
+end
+
+local function IsSupportedViewer(viewer)
+	local viewerName = GetViewerName(viewer)
+	return viewerName == "EssentialCooldownViewer"
+		or viewerName == "UtilityCooldownViewer"
+		or (trackedBuffSkin and trackedBuffSkin:IsTrackedBuffViewer(viewer))
+end
+
 local function IsEssentialUtilityViewer(viewer)
-	local viewerName = viewer and type(viewer.GetName) == "function" and viewer:GetName() or nil
+	local viewerName = GetViewerName(viewer)
 	return viewerName == "EssentialCooldownViewer" or viewerName == "UtilityCooldownViewer"
 end
 
 local function CollectKnownViewerRegions(styleData)
-	if not styleData or not styleData.cooldownFrame then
+	if not styleData then
 		return
 	end
 
@@ -371,11 +387,13 @@ local function CollectKnownViewerRegions(styleData)
 		end
 	end
 
-	for _, region in ipairs({ styleData.cooldownFrame:GetRegions() }) do
-		if region and type(region.GetObjectType) == "function" and region:GetObjectType() == "Texture" then
-			local texturePath = type(region.GetTexture) == "function" and region:GetTexture() or nil
-			if texturePath == DEFAULT_VIEWER_SWIPE_TEXTURE then
-				styleData.swipeTextures[#styleData.swipeTextures + 1] = region
+	if styleData.cooldownFrame and type(styleData.cooldownFrame.GetRegions) == "function" then
+		for _, region in ipairs({ styleData.cooldownFrame:GetRegions() }) do
+			if region and type(region.GetObjectType) == "function" and region:GetObjectType() == "Texture" then
+				local texturePath = type(region.GetTexture) == "function" and region:GetTexture() or nil
+				if texturePath == DEFAULT_VIEWER_SWIPE_TEXTURE then
+					styleData.swipeTextures[#styleData.swipeTextures + 1] = region
+				end
 			end
 		end
 	end
@@ -422,12 +440,10 @@ function Skin:BuildCooldownViewerData(itemFrame)
 		defaultMaskAtlas = DEFAULT_VIEWER_MASK_ATLAS,
 	}
 
-	if styleData.cooldownFrame and type(styleData.cooldownFrame.GetRegions) == "function" then
-		CollectKnownViewerRegions(styleData)
-		styleData.maskRegions = DeduplicateRegions(styleData.maskRegions)
-		styleData.overlayRegions = DeduplicateRegions(styleData.overlayRegions)
-		styleData.swipeTextures = DeduplicateRegions(styleData.swipeTextures)
-	end
+	CollectKnownViewerRegions(styleData)
+	styleData.maskRegions = DeduplicateRegions(styleData.maskRegions)
+	styleData.overlayRegions = DeduplicateRegions(styleData.overlayRegions)
+	styleData.swipeTextures = DeduplicateRegions(styleData.swipeTextures)
 
 	viewerStyleDataByFrame[itemFrame] = styleData
 	return styleData
@@ -454,6 +470,11 @@ function Skin:InstallRuntimeFlashHooks(button)
 	end
 
 	button.BUSkinFlashHooksInstalled = true
+end
+
+local function IsSupportedViewerItem(itemFrame)
+	local viewer = itemFrame and type(itemFrame.GetViewerFrame) == "function" and itemFrame:GetViewerFrame() or nil
+	return itemFrame and viewer ~= nil and IsSupportedViewer(viewer)
 end
 
 local function IsEssentialUtilityViewerItem(itemFrame)
@@ -695,6 +716,9 @@ function Skin:ApplyStyleData(styleData, styleState)
 	end
 
 	local borderColor = BORDER_COLOR
+	if trackedBuffSkin then
+		borderColor = trackedBuffSkin:GetBorderColorOverride(styleData.ownerFrame) or borderColor
+	end
 	if styleState.isProcActive then
 		borderColor = PROC_BORDER_COLOR
 	end
@@ -746,6 +770,10 @@ function Skin:ResetStyleData(styleData)
 		ResetTexCoord(swipeTexture)
 	end
 
+	if trackedBuffSkin then
+		trackedBuffSkin:ResetBorderStyle(styleData.ownerFrame)
+	end
+
 	if styleData.borderFrame then
 		styleData.borderFrame:Hide()
 	end
@@ -772,7 +800,7 @@ function Skin:ApplyToRuntimeButton(button, entry, visual)
 end
 
 function Skin:ApplyToCooldownViewerItem(itemFrame, allowResetWhenDisabled)
-	if not IsEssentialUtilityViewerItem(itemFrame) then
+	if not IsSupportedViewerItem(itemFrame) then
 		return
 	end
 
@@ -805,7 +833,7 @@ function Skin:ApplyToCooldownViewerItem(itemFrame, allowResetWhenDisabled)
 	SuppressProcAlertArt(itemFrame)
 	ApplyViewerReadyFlashLayout(styleData)
 	self:ApplyStyleData(styleData, ResolveViewerStyleState(itemFrame))
-	if itemFrame.PandemicIcon then
+	if itemFrame.PandemicIcon and IsEssentialUtilityViewerItem(itemFrame) then
 		EnsurePandemicFrameHooks(itemFrame.PandemicIcon)
 		ApplyPandemicStyleToItem(itemFrame)
 	end
@@ -823,7 +851,7 @@ local function IsCooldownViewerItemFrame(frame)
 end
 
 function Skin:ApplyToViewer(viewer, allowResetWhenDisabled)
-	if not viewer or not IsEssentialUtilityViewer(viewer) or not viewer.itemFramePool or type(viewer.itemFramePool.EnumerateActive) ~= "function" then
+	if not viewer or not IsSupportedViewer(viewer) or not viewer.itemFramePool or type(viewer.itemFramePool.EnumerateActive) ~= "function" then
 		return
 	end
 
@@ -890,12 +918,18 @@ function Skin:InstallHooks()
 			-- on their own, so we keep this narrow refresh assist to catch shown pandemic frames
 			-- and suppress the rounded art before it lingers on screen.
 			Skin:RefreshViewerPandemicFrames(viewer)
+			if trackedBuffSkin then
+				trackedBuffSkin:RefreshViewerPandemicFrames(viewer)
+			end
 		end)
 	end
 
 	if CooldownViewerMixin and type(CooldownViewerMixin.SetupPandemicStateFrameForItem) == "function" then
-		hooksecurefunc(CooldownViewerMixin, "SetupPandemicStateFrameForItem", function(_, itemFrame)
+		hooksecurefunc(CooldownViewerMixin, "SetupPandemicStateFrameForItem", function(viewer, itemFrame)
 			if not Skin:IsEnabled() then
+				return
+			end
+			if not IsEssentialUtilityViewer(viewer) then
 				return
 			end
 			if itemFrame and itemFrame.PandemicIcon then
@@ -908,6 +942,9 @@ function Skin:InstallHooks()
 	if CooldownViewerMixin and type(CooldownViewerMixin.AnchorPandemicStateFrame) == "function" then
 		hooksecurefunc(CooldownViewerMixin, "AnchorPandemicStateFrame", function(viewer, pandemicFrame, itemFrame)
 			if not Skin:IsEnabled() then
+				return
+			end
+			if not IsEssentialUtilityViewer(viewer) then
 				return
 			end
 			if pandemicFrame then
@@ -944,9 +981,21 @@ function Skin:InstallHooks()
 		end)
 	end
 
+	if trackedBuffSkin then
+		trackedBuffSkin:InstallHooks(function(itemFrame)
+			if not Skin:IsEnabled() then
+				return
+			end
+			Skin:ApplyToCooldownViewerItem(itemFrame)
+		end)
+	end
+
 	if CooldownViewerItemMixin and type(CooldownViewerItemMixin.ShowPandemicStateFrame) == "function" then
 		hooksecurefunc(CooldownViewerItemMixin, "ShowPandemicStateFrame", function(itemFrame)
 			if not Skin:IsEnabled() then
+				return
+			end
+			if not IsEssentialUtilityViewerItem(itemFrame) then
 				return
 			end
 			if itemFrame and itemFrame.PandemicIcon then
@@ -958,15 +1007,15 @@ function Skin:InstallHooks()
 
 	if CooldownViewerItemMixin and type(CooldownViewerItemMixin.HidePandemicStateFrame) == "function" then
 		hooksecurefunc(CooldownViewerItemMixin, "HidePandemicStateFrame", function(itemFrame)
-			if itemFrame and itemFrame.PandemicIcon and HasManagedPandemicState(itemFrame.PandemicIcon) then
+			if IsEssentialUtilityViewerItem(itemFrame) and itemFrame.PandemicIcon and HasManagedPandemicState(itemFrame.PandemicIcon) then
 				ResetPandemicFrameStyle(itemFrame.PandemicIcon)
 			end
 		end)
 	end
 
 	if CooldownViewerMixin and type(CooldownViewerMixin.HidePandemicStateFrame) == "function" then
-		hooksecurefunc(CooldownViewerMixin, "HidePandemicStateFrame", function(_, stateFrame)
-			if HasManagedPandemicState(stateFrame) then
+		hooksecurefunc(CooldownViewerMixin, "HidePandemicStateFrame", function(viewer, stateFrame)
+			if IsEssentialUtilityViewer(viewer) and HasManagedPandemicState(stateFrame) then
 				ResetPandemicFrameStyle(stateFrame)
 			end
 		end)
