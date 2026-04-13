@@ -2,6 +2,7 @@ local addonName, addonTable = ...
 local addon = addonTable or BuckleUpSidecar
 local util = addon.Util
 local constants = addon.Constants
+local barPresentation = addon.BarPresentation
 local skin = addon.CooldownViewerSkin
 local readiness = addon.Readiness
 local editMode = addon.EditMode
@@ -12,7 +13,6 @@ addon.isDraggingBar = addon.isDraggingBar or {}
 
 local LARGE_COOLDOWN_FONT = "GameFontHighlightHugeOutline"
 local SMALL_COOLDOWN_FONT = "GameFontHighlightOutline"
-local BAR_PADDING = constants.BAR_PADDING or 4
 
 local function CreateBackdrop(frame)
 	if frame.SetBackdrop then
@@ -37,6 +37,46 @@ local function PersistDraggedBarPlacement(barID, frame)
 	if editMode then
 		editMode:SaveBarAnchor(barID, frame)
 	end
+end
+
+local function ShouldBarBeShown(barFrame, bar, entries)
+	if editMode and editMode:IsActive() then
+		return true
+	end
+
+	if not bar or not addon.Profile then
+		return false
+	end
+
+	local presentation = barPresentation:Resolve(bar)
+	if not presentation then
+		return false
+	end
+
+	if #entries == 0 then
+		return false
+	end
+
+	if presentation.visibility == constants.BAR_VISIBILITY_HIDDEN then
+		return false
+	end
+
+	if presentation.visibility == constants.BAR_VISIBILITY_IN_COMBAT then
+		return UnitAffectingCombat("player") == true
+	end
+
+	return true
+end
+
+local function ApplyBarPresentation(barFrame, bar, entries)
+	if not barFrame or not bar then
+		return
+	end
+
+	local presentation = barPresentation and barPresentation:Resolve(bar)
+	local alpha = presentation and ((presentation.opacity or constants.DEFAULT_BAR_OPACITY) / 100) or 1
+	barFrame:SetAlpha(alpha)
+	barFrame:SetShown(ShouldBarBeShown(barFrame, bar, entries))
 end
 
 local function ResetCooldown(button)
@@ -359,26 +399,28 @@ function Bars:EnsureBarFrames()
 end
 
 function Bars:LayoutBar(barFrame, bar, entries)
-	local iconSize = bar.iconSize or 40
-	local spacing = bar.spacing or 6
+	local presentation = barPresentation:Resolve(bar)
+	local iconSize = presentation and presentation.iconSize or constants.ESSENTIAL_BASE_ICON_SIZE
+	local spacing = presentation and presentation.interIconSpacing or ((constants.DEFAULT_BAR_PADDING or 0) + (constants.BLIZZARD_COOLDOWN_VIEWER_PADDING_OFFSET or 0))
+	local barPadding = presentation and presentation.outerPadding or 0
 	local growthDirection = bar.growthDirection or constants.GROWTH_RIGHT
 	local contentWidth = #entries > 0 and ((#entries * iconSize) + ((#entries - 1) * spacing)) or iconSize
-	local width = contentWidth + (BAR_PADDING * 2)
-	local height = iconSize + (BAR_PADDING * 2)
+	local width = contentWidth + (barPadding * 2)
+	local height = iconSize + (barPadding * 2)
 
 	for index, entry in ipairs(entries) do
 		local button = self:AcquireButton(barFrame, index)
 		button:ClearAllPoints()
 		local offsetX
 		if growthDirection == constants.GROWTH_LEFT then
-			offsetX = BAR_PADDING + ((#entries - index) * (iconSize + spacing))
+			offsetX = barPadding + ((#entries - index) * (iconSize + spacing))
 		elseif growthDirection == constants.GROWTH_CENTER then
 			local startX = math.floor((width - contentWidth) / 2)
 			offsetX = startX + ((index - 1) * (iconSize + spacing))
 		else
-			offsetX = BAR_PADDING + ((index - 1) * (iconSize + spacing))
+			offsetX = barPadding + ((index - 1) * (iconSize + spacing))
 		end
-		button:SetPoint("TOPLEFT", barFrame, "TOPLEFT", offsetX, -BAR_PADDING)
+		button:SetPoint("TOPLEFT", barFrame, "TOPLEFT", offsetX, -barPadding)
 		button:SetSize(iconSize, iconSize)
 		ApplyCooldownCountFont(button, iconSize)
 		button.Overlay:ClearAllPoints()
@@ -422,6 +464,7 @@ function Bars:LayoutBar(barFrame, bar, entries)
 	end
 
 	barFrame:SetSize(math.max(width, 18), height)
+	ApplyBarPresentation(barFrame, bar, entries)
 end
 
 function Bars:RefreshRuntime()

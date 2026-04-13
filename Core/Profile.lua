@@ -2,9 +2,30 @@ local addonName, addonTable = ...
 local addon = addonTable or BuckleUpSidecar
 local util = addon.Util
 local constants = addon.Constants
+local barPresentation = addon.BarPresentation
 
 local Profile = {}
 addon.Profile = Profile
+
+local function ClampValue(value, minValue, maxValue)
+	if value == nil then
+		return minValue
+	end
+	if value < minValue then
+		return minValue
+	end
+	if value > maxValue then
+		return maxValue
+	end
+	return value
+end
+
+local function RoundToNearestStep(value, step)
+	if not value or not step or step <= 0 then
+		return value
+	end
+	return math.floor((value / step) + 0.5) * step
+end
 
 local function SortEntries(entries)
 	util.sort(entries, function(left, right)
@@ -24,10 +45,38 @@ local function NormalizeBar(bar, index)
 	normalized.relativeTo = type(normalized.relativeTo) == "string" and normalized.relativeTo or "UIParent"
 	normalized.x = util.NumberOrNil(normalized.x) or 0
 	normalized.y = util.NumberOrNil(normalized.y) or 0
-	normalized.iconSize = util.NumberOrNil(normalized.iconSize) or 40
-	normalized.spacing = util.NumberOrNil(normalized.spacing) or 6
+	local legacyIconSize = util.NumberOrNil(normalized.iconSize)
+	local legacySpacing = util.NumberOrNil(normalized.spacing)
+	local legacyEnabled = normalized.enabled
+	local sizePercent = util.NumberOrNil(normalized.sizePercent)
+	if sizePercent == nil and legacyIconSize then
+		sizePercent = RoundToNearestStep((legacyIconSize / constants.ESSENTIAL_BASE_ICON_SIZE) * 100, 10)
+	end
+	local padding = util.NumberOrNil(normalized.padding)
+	if padding == nil and legacySpacing ~= nil then
+		padding = legacySpacing
+	end
+	local opacity = util.NumberOrNil(normalized.opacity)
+	local visibility = normalized.visibility
+	if visibility == nil and legacyEnabled == false then
+		visibility = constants.BAR_VISIBILITY_HIDDEN
+	end
+	local normalizedPresentation = barPresentation:NormalizeStoredFields({
+		sizePercent = sizePercent,
+		padding = padding,
+		opacity = opacity,
+		visibility = visibility,
+		matchMode = normalized.matchMode,
+	})
+	normalized.sizePercent = normalizedPresentation.sizePercent
+	normalized.padding = normalizedPresentation.padding
+	normalized.opacity = normalizedPresentation.opacity
+	normalized.visibility = normalizedPresentation.visibility
+	normalized.matchMode = normalizedPresentation.matchMode
+	normalized.iconSize = math.floor((constants.ESSENTIAL_BASE_ICON_SIZE * normalized.sizePercent / 100) + 0.5)
+	normalized.spacing = normalized.padding
 	normalized.growthDirection = normalized.growthDirection or constants.GROWTH_RIGHT
-	normalized.enabled = normalized.enabled ~= false
+	normalized.enabled = normalized.visibility ~= constants.BAR_VISIBILITY_HIDDEN
 	return normalized
 end
 
@@ -249,6 +298,10 @@ function Profile:UpdateBarLayout(barID, fields)
 		return false
 	end
 	for key, value in pairs(fields or {}) do
+		bar[key] = value
+	end
+	local normalized = NormalizeBar(bar, 1)
+	for key, value in pairs(normalized) do
 		bar[key] = value
 	end
 	self:CommitProfile()

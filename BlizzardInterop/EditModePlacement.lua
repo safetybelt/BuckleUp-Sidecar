@@ -2,12 +2,15 @@ local addonName, addonTable = ...
 local addon = addonTable or BuckleUpSidecar
 local util = addon.Util
 local constants = addon.Constants
+local barPresentation = addon.BarPresentation
 
 local EditModePlacement = {}
 addon.EditModePlacement = EditModePlacement
 
 local SIDECAR_EDIT_MODE_SYSTEM_BASE = 9100
-local BAR_PADDING = constants.BAR_PADDING or 4
+-- Narrow visual correction for Blizzard cooldown viewer side snaps. This stays here,
+-- close to the magnetism shim, so the presentation model itself remains data-driven.
+local COOLDOWN_VIEWER_SIDE_SNAP_NUDGE = 4
 local CENTER_ALIGNMENT_TARGETS = {
 	EssentialCooldownViewer = true,
 	UtilityCooldownViewer = true,
@@ -50,6 +53,14 @@ local function IsCenterAlignmentTarget(frame)
 	return frameName and CENTER_ALIGNMENT_TARGETS[frameName] == true
 end
 
+local function IsBlizzardCooldownViewerTarget(frame)
+	local frameName = GetPointFrameName(frame)
+	return frameName == "EssentialCooldownViewer"
+		or frameName == "UtilityCooldownViewer"
+		or frameName == "BuffIconCooldownViewer"
+		or frameName == "BuffBarCooldownViewer"
+end
+
 local function GetHorizontalAnchorDirection(point)
 	if not point then
 		return 0
@@ -90,21 +101,36 @@ local function GetPinnedVisualX(barFrame, bar)
 	end
 
 	local growthDirection = bar.growthDirection or constants.GROWTH_RIGHT
-	local iconSize = util.NumberOrNil(bar.iconSize) or 40
+	local presentation = barPresentation and barPresentation:Resolve(bar) or nil
+	local iconSize = presentation and presentation.iconSize or util.NumberOrNil(bar.iconSize) or constants.ESSENTIAL_BASE_ICON_SIZE
+	local barPadding = presentation and presentation.outerPadding or 0
 
 	if growthDirection == constants.GROWTH_LEFT then
-		return width - BAR_PADDING - (iconSize / 2)
+		return width - barPadding - (iconSize / 2)
 	end
 
 	if growthDirection == constants.GROWTH_CENTER then
 		return width / 2
 	end
 
-	return BAR_PADDING + (iconSize / 2)
+	return barPadding + (iconSize / 2)
 end
 
-local function GetVisualAnchorOffsetX(barFrame, bar, point)
+local function ShouldPreserveFrameEdgeAnchor(point, relativeTo, relativePoint)
+	if not relativeTo or not IsCenterAlignmentTarget(relativeTo) then
+		return false
+	end
+
+	return (point == "LEFT" and relativePoint == "RIGHT")
+		or (point == "RIGHT" and relativePoint == "LEFT")
+end
+
+local function GetVisualAnchorOffsetX(barFrame, bar, point, relativeTo, relativePoint)
 	if not barFrame or not bar then
+		return 0
+	end
+
+	if ShouldPreserveFrameEdgeAnchor(point, relativeTo, relativePoint) then
 		return 0
 	end
 
@@ -129,14 +155,16 @@ function EditModePlacement:ApplyBarAnchor(barFrame, bar)
 	-- Saved x/y represent the pinned visual reference for the current growth mode,
 	-- not the raw frame edge. We convert between that visual point and the frame anchor
 	-- symmetrically on load/save so size and spacing changes do not make the bar walk.
-	local offsetX = GetVisualAnchorOffsetX(barFrame, bar, point)
+	local relativeTo = ResolveRelativeFrame(bar.relativeTo)
+	local relativePoint = bar.relativePoint or point
+	local offsetX = GetVisualAnchorOffsetX(barFrame, bar, point, relativeTo, relativePoint)
 
 	barFrame:ClearAllPoints()
 	if bar.relativeTo then
 		barFrame:SetPoint(
 			point,
-			ResolveRelativeFrame(bar.relativeTo),
-			bar.relativePoint or point,
+			relativeTo,
+			relativePoint,
 			(bar.x or 0) - offsetX,
 			bar.y or 0
 		)
@@ -154,12 +182,12 @@ function EditModePlacement:SaveBarAnchor(barID, barFrame)
 		return
 	end
 
-	offsetX = (offsetX or 0) + GetVisualAnchorOffsetX(barFrame, bar, point)
-
 	local snappedToFrame = barFrame.snappedToFrame
 	if (not relativeTo or relativeTo == UIParent) and snappedToFrame then
 		relativeTo = snappedToFrame
 	end
+
+	offsetX = (offsetX or 0) + GetVisualAnchorOffsetX(barFrame, bar, point, relativeTo, relativePoint)
 
 	local relativeToName = relativeTo and relativeTo.GetName and relativeTo:GetName() or "UIParent"
 	local layout = {
@@ -195,6 +223,13 @@ function EditModePlacement:ApplyKnownTargetAlignment(barFrame)
 	local adjustedY = offsetY or 0
 	if (point == "LEFT" and relativePoint == "RIGHT") or (point == "RIGHT" and relativePoint == "LEFT") then
 		adjustedY = 0
+		if IsBlizzardCooldownViewerTarget(relativeTo) then
+			if point == "LEFT" and relativePoint == "RIGHT" then
+				adjustedX = adjustedX - COOLDOWN_VIEWER_SIDE_SNAP_NUDGE
+			else
+				adjustedX = adjustedX + COOLDOWN_VIEWER_SIDE_SNAP_NUDGE
+			end
+		end
 	elseif (point == "TOP" and relativePoint == "BOTTOM") or (point == "BOTTOM" and relativePoint == "TOP") then
 		adjustedX = 0
 	elseif point == "CENTER" and relativePoint == "CENTER" then

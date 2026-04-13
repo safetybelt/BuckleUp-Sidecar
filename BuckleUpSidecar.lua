@@ -79,6 +79,21 @@ local function RefreshRuntimeOnly()
 	addon.Bars:RefreshRuntime()
 end
 
+local function RegisterCooldownViewerCallbacks()
+	if addon.cooldownViewerCallbacksRegistered then
+		return
+	end
+
+	if not EventRegistry or type(EventRegistry.RegisterCallback) ~= "function" then
+		return
+	end
+
+	EventRegistry:RegisterCallback("CooldownViewerSettings.OnDataChanged", function()
+		RefreshRuntimeOnly()
+	end, addon)
+	addon.cooldownViewerCallbacksRegistered = true
+end
+
 local function SeedDefaultEntries()
 	if #addon.Profile:GetConfiguredEntries() > 0 then
 		return
@@ -286,6 +301,8 @@ frame:RegisterEvent("SPELLS_CHANGED")
 frame:RegisterEvent("SPELL_UPDATE_COOLDOWN")
 frame:RegisterEvent("SPELL_UPDATE_CHARGES")
 frame:RegisterEvent("BAG_UPDATE_COOLDOWN")
+frame:RegisterEvent("PLAYER_REGEN_DISABLED")
+frame:RegisterEvent("PLAYER_REGEN_ENABLED")
 
 frame:SetScript("OnEvent", function(_, event, ...)
 	if event == "ADDON_LOADED" then
@@ -298,6 +315,9 @@ frame:SetScript("OnEvent", function(_, event, ...)
 		end
 		if loadedAddon == "Blizzard_CooldownViewer" and addon.SettingsIntegration then
 			addon.SettingsIntegration:Initialize()
+		end
+		if loadedAddon == "Blizzard_CooldownViewer" then
+			RegisterCooldownViewerCallbacks()
 		end
 		if loadedAddon == "Blizzard_CooldownViewer" and addon.CooldownViewerSkin then
 			addon.CooldownViewerSkin:RefreshAll()
@@ -315,6 +335,7 @@ frame:SetScript("OnEvent", function(_, event, ...)
 		if addon.SettingsIntegration then
 			addon.SettingsIntegration:Initialize()
 		end
+		RegisterCooldownViewerCallbacks()
 		if addon.EditMode then
 			addon.EditMode:Initialize()
 		end
