@@ -1,38 +1,28 @@
 local addonName, addonTable = ...
 local addon = addonTable or BuckleUpSidecar
 local util = addon.Util
+local spellDisplayState = addon.SpellDisplayState
 
 local Readiness = {}
 addon.Readiness = Readiness
 
+-- Item readiness still belongs here. Spell/racial runtime display state now lives in
+-- Runtime/SpellDisplayState.lua so cooldown-driven visual policy has one explicit owner.
 function Readiness:IsSpellReadyForUse(spellID)
 	if not spellID then
 		return false
 	end
 
-	if not util.IsSpellUsableSafe(spellID) then
+	if not util.IsKnownPlayerSpell(spellID) then
 		return false
 	end
 
-	local chargeInfo = util.GetSpellChargesSafe(spellID)
-	if chargeInfo and chargeInfo.currentCharges ~= nil and chargeInfo.maxCharges ~= nil then
-		-- Some spells are charge-backed even when the player currently only has one
-		-- charge available. In those cases readiness still follows currentCharges.
-		return (chargeInfo.currentCharges or 0) > 0
+	local chargeInfo = spellDisplayState and spellDisplayState:GetChargeInfo(spellID) or nil
+	if chargeInfo and chargeInfo.maxCharges and chargeInfo.maxCharges > 1 then
+		return chargeInfo.currentCharges > 0
 	end
 
-	local cooldownState = util.GetSpellCooldownState(spellID)
-	if cooldownState then
-		if cooldownState.isOnGCD then
-			return true
-		end
-		if cooldownState.isEnabled == false then
-			return false
-		end
-	end
-
-	local durationObject = util.GetSpellCooldownDurationObject(spellID)
-	return durationObject == nil
+	return true
 end
 
 function Readiness:IsItemReadyForUse(itemID, slotID)

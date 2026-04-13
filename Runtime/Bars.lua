@@ -5,6 +5,7 @@ local constants = addon.Constants
 local barPresentation = addon.BarPresentation
 local skin = addon.CooldownViewerSkin
 local readiness = addon.Readiness
+local spellDisplayState = addon.SpellDisplayState
 local editMode = addon.EditMode
 
 local Bars = {}
@@ -85,6 +86,29 @@ local function ResetCooldown(button)
 	button.Cooldown:Hide()
 end
 
+local function UpdateButtonDesaturation(button)
+	if not button or not button.Icon or not button.entry then
+		return
+	end
+
+	local shouldDesaturate = button.baseShouldDesaturate == true
+	if not shouldDesaturate and (button.entry.kind == "spell" or button.entry.kind == "racial") then
+		shouldDesaturate = spellDisplayState and spellDisplayState:ShouldDesaturate(
+			button.entry.spellID,
+			button.Cooldown,
+			button.cooldownFrameCountsForDesaturation
+		) or false
+	end
+
+	if button.lastShouldDesaturate == shouldDesaturate then
+		return
+	end
+
+	button.lastShouldDesaturate = shouldDesaturate
+	button.Icon:SetDesaturated(shouldDesaturate)
+	button.Icon:SetAlpha(shouldDesaturate and 0.82 or 1)
+end
+
 local function ApplyCooldownCountFont(button, iconSize)
 	if not button or not button.Cooldown or type(button.Cooldown.SetCountdownFont) ~= "function" then
 		return
@@ -122,7 +146,7 @@ local function GetEntryVisual(entry)
 	elseif entry.kind == "spell" or entry.kind == "racial" then
 		info.spellID = catalogEntry.spellID
 		info.isAvailable = util.IsKnownPlayerSpell(catalogEntry.spellID)
-		info.isUsable = info.isAvailable and readiness and readiness:IsSpellReadyForUse(catalogEntry.spellID) or false
+		info.isUsable = info.isAvailable
 	end
 
 	return info
@@ -143,9 +167,11 @@ end
 local function ApplySpellCooldown(button, spellID)
 	local durationObject = util.GetSpellCooldownDurationObject(spellID)
 	local chargeObject = util.GetSpellChargeDurationObject(spellID)
-	local chargeInfo = util.GetSpellChargesSafe(spellID)
+	local chargeInfo = spellDisplayState and spellDisplayState:GetChargeInfo(spellID) or nil
+	local cooldownState = util.GetSpellCooldownState(spellID)
 	local hasMultipleCharges = chargeInfo and chargeInfo.maxCharges and chargeInfo.maxCharges > 1
 
+	button.cooldownFrameCountsForDesaturation = true
 	button.CountText:SetText("")
 	if hasMultipleCharges and chargeInfo.currentCharges ~= nil then
 		button.CountText:SetText(tostring(chargeInfo.currentCharges))
@@ -157,6 +183,16 @@ local function ApplySpellCooldown(button, spellID)
 	if hasMultipleCharges and chargeObject and button.Cooldown.SetCooldownFromDurationObject then
 		button.Cooldown:SetDrawSwipe(true)
 		button.Cooldown:SetCooldownFromDurationObject(chargeObject)
+		button.Cooldown:Show()
+		return
+	end
+
+	-- Pure global-cooldown visuals should swipe without graying the icon. Off-GCD spells
+	-- continue to avoid GCD swipe because their spell cooldown state does not report as GCD.
+	if cooldownState and cooldownState.isOnGCD and durationObject and button.Cooldown.SetCooldownFromDurationObject then
+		button.cooldownFrameCountsForDesaturation = false
+		button.Cooldown:SetDrawSwipe(true)
+		button.Cooldown:SetCooldownFromDurationObject(durationObject)
 		button.Cooldown:Show()
 		return
 	end
@@ -219,6 +255,17 @@ function Bars:CreateButton(parent)
 	if button.Cooldown.SetDrawEdge then
 		button.Cooldown:SetDrawEdge(false)
 	end
+	if button.Cooldown.HookScript then
+		button.Cooldown:HookScript("OnShow", function()
+			UpdateButtonDesaturation(button)
+		end)
+		button.Cooldown:HookScript("OnHide", function()
+			UpdateButtonDesaturation(button)
+		end)
+		button.Cooldown:HookScript("OnCooldownDone", function()
+			UpdateButtonDesaturation(button)
+		end)
+	end
 
 	button.Overlay = button:CreateTexture(nil, "OVERLAY")
 	button.Overlay:SetAtlas("UI-HUD-CoolDownManager-IconOverlay")
@@ -265,6 +312,15 @@ function Bars:CreateButton(parent)
 	end)
 	button:SetScript("OnLeave", function()
 		GameTooltip:Hide()
+	end)
+	button:SetScript("OnUpdate", function(self)
+		if not self:IsShown() or not self.entry then
+			return
+		end
+		if self.entry.kind ~= "spell" and self.entry.kind ~= "racial" then
+			return
+		end
+		UpdateButtonDesaturation(self)
 	end)
 	button:RegisterForDrag("LeftButton")
 	button:SetScript("OnDragStart", function(self)
@@ -433,9 +489,10 @@ function Bars:LayoutBar(barFrame, bar, entries)
 		local visual = GetEntryVisual(entry)
 		if visual and visual.isAvailable then
 			button.Icon:SetTexture(visual.icon or constants.FALLBACK_ITEM_ICON)
-			button.Icon:SetDesaturated(visual.isUsable == false)
-			button.Icon:SetAlpha(visual.isUsable == false and 0.82 or 1)
 			button:SetAlpha(1)
+			button.baseShouldDesaturate = entry.kind ~= "spell" and entry.kind ~= "racial" and visual.isUsable == false or false
+			button.cooldownFrameCountsForDesaturation = true
+			button.lastShouldDesaturate = nil
 			if entry.kind == "trinketSlot" then
 				ApplyItemCooldown(button, visual.itemID, visual.slotID)
 			elseif entry.kind == "item" then
@@ -443,16 +500,19 @@ function Bars:LayoutBar(barFrame, bar, entries)
 			else
 				ApplySpellCooldown(button, visual.spellID)
 			end
+			UpdateButtonDesaturation(button)
 			if skin then
 				skin:ApplyToRuntimeButton(button, entry, visual)
 			end
 		else
 			button.Icon:SetTexture((visual and visual.icon) or constants.FALLBACK_ITEM_ICON)
-			button.Icon:SetDesaturated(true)
-			button.Icon:SetAlpha(0.72)
 			button:SetAlpha(1)
+			button.baseShouldDesaturate = true
+			button.cooldownFrameCountsForDesaturation = true
+			button.lastShouldDesaturate = nil
 			button.CountText:SetText("")
 			ResetCooldown(button)
+			UpdateButtonDesaturation(button)
 			if skin then
 				skin:ApplyToRuntimeButton(button, entry, visual)
 			end

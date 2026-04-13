@@ -15,6 +15,7 @@ BlizzardInterop\CooldownViewerSkin.lua
 BlizzardInterop\EditModePlacement.lua
 BlizzardInterop\EditModeSelection.lua
 BlizzardInterop\EditMode.lua
+Runtime\SpellDisplayState.lua
 Runtime\Readiness.lua
 Runtime\Bars.lua
 UI\EditModePanel.lua
