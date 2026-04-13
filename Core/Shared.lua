@@ -526,21 +526,39 @@ function util.GetSpellChargesSafe(spellID)
 	if not spellID then
 		return nil
 	end
+
+	local function NormalizeChargeInfo(chargeInfo)
+		if type(chargeInfo) ~= "table" then
+			return nil
+		end
+
+		local normalized = util.ShallowCopy(chargeInfo)
+		normalized.currentCharges = util.NumberOrNil(chargeInfo.currentCharges)
+		normalized.maxCharges = util.NumberOrNil(chargeInfo.maxCharges)
+		normalized.cooldownStartTime = util.NumberOrNil(chargeInfo.cooldownStartTime)
+		normalized.cooldownDuration = util.NumberOrNil(chargeInfo.cooldownDuration)
+		normalized.chargeModRate = util.NumberOrNil(chargeInfo.chargeModRate)
+		return normalized
+	end
+
 	if type(C_Spell) == "table" and type(C_Spell.GetSpellCharges) == "function" then
 		local chargeInfo = C_Spell.GetSpellCharges(spellID)
 		if chargeInfo then
-			return chargeInfo
+			return NormalizeChargeInfo(chargeInfo)
 		end
 
 		local resolvedSpellID = util.ResolveSpellVariantID(spellID)
 		if resolvedSpellID and resolvedSpellID ~= spellID then
-			return C_Spell.GetSpellCharges(resolvedSpellID)
+			return NormalizeChargeInfo(C_Spell.GetSpellCharges(resolvedSpellID))
 		end
 	end
 	if type(GetSpellCharges) == "function" then
 		local currentCharges, maxCharges = GetSpellCharges(spellID)
 		if currentCharges ~= nil then
-			return { currentCharges = currentCharges, maxCharges = maxCharges }
+			return NormalizeChargeInfo({
+				currentCharges = currentCharges,
+				maxCharges = maxCharges,
+			})
 		end
 	end
 end

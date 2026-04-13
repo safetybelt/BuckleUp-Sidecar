@@ -12,9 +12,9 @@ local ICON_TEX_COORD = {
 }
 
 local BORDER_COLOR = { r = 0.10, g = 0.10, b = 0.10, a = 0.96 }
-local AURA_BORDER_COLOR = { r = 0.95, g = 0.82, b = 0.25, a = 0.96 }
 local PROC_BORDER_COLOR = { r = 1.00, g = 0.91, b = 0.38, a = 1.00 }
 local FLASH_BORDER_COLOR = { r = 0.95, g = 0.82, b = 0.25, a = 1.00 }
+local PANDEMIC_BORDER_COLOR = { r = 0.92, g = 0.22, b = 0.22, a = 0.98 }
 
 local SQUARE_SWIPE_TEXTURE = "Interface\\Buttons\\WHITE8X8"
 local DEFAULT_VIEWER_SWIPE_TEXTURE = "Interface\\HUD\\UI-HUD-CoolDownManager-Icon-Swipe"
@@ -24,9 +24,11 @@ local DEFAULT_VIEWER_MASK_ATLAS = "UI-HUD-CoolDownManager-Mask"
 local COOLDOWN_VIEWER_FRAME_NAMES = {
 	"EssentialCooldownViewer",
 	"UtilityCooldownViewer",
-	"BuffIconCooldownViewer",
-	"BuffBarCooldownViewer",
 }
+
+local SetBorderColor
+local viewerStyleDataByFrame = setmetatable({}, { __mode = "k" })
+local pandemicStateByFrame = setmetatable({}, { __mode = "k" })
 
 local function SafeCall(methodOwner, methodName, ...)
 	if not methodOwner then
@@ -72,6 +74,73 @@ local function AddRegionTargets(frame, targets)
 	end
 end
 
+local function SnapshotFramePoints(frame)
+	if not frame or type(frame.GetNumPoints) ~= "function" or type(frame.GetPoint) ~= "function" then
+		return nil
+	end
+
+	local points = {}
+	for index = 1, frame:GetNumPoints() do
+		local point, relativeTo, relativePoint, xOfs, yOfs = frame:GetPoint(index)
+		points[#points + 1] = {
+			point = point,
+			relativeTo = relativeTo,
+			relativePoint = relativePoint,
+			xOfs = xOfs,
+			yOfs = yOfs,
+		}
+	end
+
+	return points
+end
+
+local function RestoreFramePoints(frame, points)
+	if not frame or not points or type(frame.ClearAllPoints) ~= "function" or type(frame.SetPoint) ~= "function" then
+		return
+	end
+
+	frame:ClearAllPoints()
+	for _, pointInfo in ipairs(points) do
+		frame:SetPoint(pointInfo.point, pointInfo.relativeTo, pointInfo.relativePoint, pointInfo.xOfs, pointInfo.yOfs)
+	end
+end
+
+local function CreateSquareOutlineFrame(parent, thickness, frameLevelOffset)
+	local frame = CreateFrame("Frame", nil, parent)
+	frame:SetFrameStrata(parent:GetFrameStrata())
+	frame:SetFrameLevel(math.max(parent:GetFrameLevel() + (frameLevelOffset or 0), 1))
+
+	frame.BUTop = frame:CreateTexture(nil, "ARTWORK")
+	frame.BUBottom = frame:CreateTexture(nil, "ARTWORK")
+	frame.BULeft = frame:CreateTexture(nil, "ARTWORK")
+	frame.BURight = frame:CreateTexture(nil, "ARTWORK")
+
+	for _, texture in ipairs({ frame.BUTop, frame.BUBottom, frame.BULeft, frame.BURight }) do
+		texture:SetTexture("Interface\\Buttons\\WHITE8X8")
+	end
+
+	local edgeSize = thickness or 2
+	frame.BUTop:SetPoint("TOPLEFT")
+	frame.BUTop:SetPoint("TOPRIGHT")
+	frame.BUTop:SetHeight(edgeSize)
+
+	frame.BUBottom:SetPoint("BOTTOMLEFT")
+	frame.BUBottom:SetPoint("BOTTOMRIGHT")
+	frame.BUBottom:SetHeight(edgeSize)
+
+	frame.BULeft:SetPoint("TOPLEFT")
+	frame.BULeft:SetPoint("BOTTOMLEFT")
+	frame.BULeft:SetWidth(edgeSize)
+
+	frame.BURight:SetPoint("TOPRIGHT")
+	frame.BURight:SetPoint("BOTTOMRIGHT")
+	frame.BURight:SetWidth(edgeSize)
+
+	frame:SetAlpha(1)
+	frame:Hide()
+	return frame
+end
+
 local function EnsureBorderFrame(styleData)
 	if not styleData or styleData.borderFrame then
 		return styleData and styleData.borderFrame or nil
@@ -82,25 +151,16 @@ local function EnsureBorderFrame(styleData)
 		return nil
 	end
 
-	local borderFrame = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+	local borderFrame = CreateSquareOutlineFrame(parent, 2, 1)
 	borderFrame:SetPoint("TOPLEFT", styleData.iconTexture, "TOPLEFT", -2, 2)
 	borderFrame:SetPoint("BOTTOMRIGHT", styleData.iconTexture, "BOTTOMRIGHT", 2, -2)
-	borderFrame:SetFrameStrata(parent:GetFrameStrata())
-	borderFrame:SetFrameLevel(math.max(parent:GetFrameLevel() + 1, 1))
-	borderFrame:SetBackdrop({
-		edgeFile = "Interface\\Buttons\\WHITE8X8",
-		edgeSize = 2,
-		insets = { left = 0, right = 0, top = 0, bottom = 0 },
-	})
-	borderFrame:SetBackdropColor(0, 0, 0, 0)
-	borderFrame:SetBackdropBorderColor(BORDER_COLOR.r, BORDER_COLOR.g, BORDER_COLOR.b, BORDER_COLOR.a)
 	borderFrame:Hide()
 
 	styleData.borderFrame = borderFrame
 	return borderFrame
 end
 
-local function EnsureFlashFrame(styleData)
+local function EnsureRuntimeFlashFrame(styleData)
 	if not styleData or styleData.flashFrame then
 		return styleData and styleData.flashFrame or nil
 	end
@@ -110,18 +170,10 @@ local function EnsureFlashFrame(styleData)
 		return nil
 	end
 
-	local flashFrame = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+	local flashFrame = CreateSquareOutlineFrame(parent, 3, 4)
 	flashFrame:SetPoint("TOPLEFT", styleData.iconTexture, "TOPLEFT", -3, 3)
 	flashFrame:SetPoint("BOTTOMRIGHT", styleData.iconTexture, "BOTTOMRIGHT", 3, -3)
-	flashFrame:SetFrameStrata(parent:GetFrameStrata())
-	flashFrame:SetFrameLevel(math.max(parent:GetFrameLevel() + 4, 1))
-	flashFrame:SetBackdrop({
-		edgeFile = "Interface\\Buttons\\WHITE8X8",
-		edgeSize = 3,
-		insets = { left = 0, right = 0, top = 0, bottom = 0 },
-	})
-	flashFrame:SetBackdropColor(0, 0, 0, 0)
-	flashFrame:SetBackdropBorderColor(FLASH_BORDER_COLOR.r, FLASH_BORDER_COLOR.g, FLASH_BORDER_COLOR.b, FLASH_BORDER_COLOR.a)
+	SetBorderColor(flashFrame, FLASH_BORDER_COLOR)
 	flashFrame:SetAlpha(0)
 	flashFrame:Hide()
 
@@ -160,52 +212,22 @@ local function EnsureFlashFrame(styleData)
 	return flashFrame
 end
 
-local function PlayBorderFlash(styleData, startDelay)
-	if not styleData then
+SetBorderColor = function(frame, colorInfo)
+	if not frame or not colorInfo then
 		return
 	end
 
-	EnsureFlashFrame(styleData)
-	if not styleData.flashAnimation then
-		return
+	for _, texture in ipairs({ frame.BUTop, frame.BUBottom, frame.BULeft, frame.BURight }) do
+		if texture and type(texture.SetVertexColor) == "function" then
+			texture:SetVertexColor(colorInfo.r, colorInfo.g, colorInfo.b, colorInfo.a)
+		end
 	end
-
-	if styleData.flashFadeIn and type(styleData.flashFadeIn.SetStartDelay) == "function" then
-		styleData.flashFadeIn:SetStartDelay(startDelay or 0)
-	end
-	if styleData.flashFadeOut and type(styleData.flashFadeOut.SetStartDelay) == "function" then
-		styleData.flashFadeOut:SetStartDelay((startDelay or 0) + 0.10)
-	end
-
-	if styleData.flashAnimation:IsPlaying() then
-		styleData.flashAnimation:Stop()
-	end
-	styleData.flashAnimation:Play()
-end
-
-local function SetBorderColor(frame, colorInfo)
-	if not frame or not colorInfo or type(frame.SetBackdropBorderColor) ~= "function" then
-		return
-	end
-
-	frame:SetBackdropBorderColor(colorInfo.r, colorInfo.g, colorInfo.b, colorInfo.a)
 end
 
 local function ResolveViewerStyleState(itemFrame)
-	local isAuraActive = itemFrame and itemFrame.wasSetFromAura == true
-	local isProcActive = false
-
-	if itemFrame and itemFrame.SpellActivationAlert and itemFrame.SpellActivationAlert.IsShown and itemFrame.SpellActivationAlert:IsShown() then
-		isProcActive = true
-	end
-
-	local spellID = itemFrame and itemFrame.GetSpellID and itemFrame:GetSpellID() or nil
-	if spellID and type(C_SpellActivationOverlay) == "table" and type(C_SpellActivationOverlay.IsSpellOverlayed) == "function" then
-		isProcActive = C_SpellActivationOverlay.IsSpellOverlayed(spellID) == true or isProcActive
-	end
+	local isProcActive = itemFrame and itemFrame.SpellActivationAlert and itemFrame.SpellActivationAlert.IsShown and itemFrame.SpellActivationAlert:IsShown() or false
 
 	return {
-		isAuraActive = isAuraActive,
 		isProcActive = isProcActive,
 	}
 end
@@ -216,12 +238,6 @@ local function SuppressProcAlertArt(itemFrame)
 		return
 	end
 
-	if alertFrame.ProcStartAnim and type(alertFrame.ProcStartAnim.Stop) == "function" then
-		alertFrame.ProcStartAnim:Stop()
-	end
-	if alertFrame.ProcLoop and type(alertFrame.ProcLoop.Stop) == "function" then
-		alertFrame.ProcLoop:Stop()
-	end
 	if alertFrame.ProcStartFlipbook and type(alertFrame.ProcStartFlipbook.Hide) == "function" then
 		alertFrame.ProcStartFlipbook:Hide()
 	end
@@ -231,10 +247,6 @@ local function SuppressProcAlertArt(itemFrame)
 	if alertFrame.ProcAltGlow and type(alertFrame.ProcAltGlow.Hide) == "function" then
 		alertFrame.ProcAltGlow:Hide()
 	end
-	alertFrame:SetAlpha(0)
-	if type(alertFrame.Hide) == "function" then
-		alertFrame:Hide()
-	end
 end
 
 local function RestoreProcAlertArt(itemFrame)
@@ -243,37 +255,27 @@ local function RestoreProcAlertArt(itemFrame)
 		return
 	end
 
-	alertFrame:SetAlpha(1)
-
-	Skin.procAlertRestoreInProgress = Skin.procAlertRestoreInProgress or {}
-	if Skin.procAlertRestoreInProgress[itemFrame] then
+	if alertFrame.IsShown and not alertFrame:IsShown() then
 		return
 	end
 
-	local hasAlert = ActionButtonSpellAlertManager
-		and type(ActionButtonSpellAlertManager.HasAlert) == "function"
-		and ActionButtonSpellAlertManager:HasAlert(itemFrame)
-
-	if not hasAlert then
-		return
+	-- Sidecar only suppresses Blizzard's visible proc subregions, so restoration should
+	-- remain equally lightweight: just show those subregions again if the alert frame
+	-- itself is active. Replaying Blizzard's alert manager lifecycle here is unnecessary
+	-- and risks touching protected internal state during mode switches.
+	if alertFrame.ProcStartFlipbook and type(alertFrame.ProcStartFlipbook.Show) == "function" then
+		alertFrame.ProcStartFlipbook:Show()
 	end
-
-	-- We suppress Blizzard's proc art by stopping/hiding its alert frame. When the
-	-- unified style is turned off mid-session, the safest restoration is to hand the
-	-- frame back to Blizzard by replaying its own hide/show path once.
-	Skin.procAlertRestoreInProgress[itemFrame] = true
-	if type(ActionButtonSpellAlertManager.HideAlert) == "function" then
-		ActionButtonSpellAlertManager:HideAlert(itemFrame)
+	if alertFrame.ProcLoopFlipbook and type(alertFrame.ProcLoopFlipbook.Show) == "function" then
+		alertFrame.ProcLoopFlipbook:Show()
 	end
-	if type(ActionButtonSpellAlertManager.ShowAlert) == "function" then
-		ActionButtonSpellAlertManager:ShowAlert(itemFrame)
+	if alertFrame.ProcAltGlow and type(alertFrame.ProcAltGlow.Show) == "function" then
+		alertFrame.ProcAltGlow:Show()
 	end
-	Skin.procAlertRestoreInProgress[itemFrame] = nil
 end
 
 function Skin:GetRuntimeState(entry, visual)
 	local state = {
-		isAuraActive = false,
 		isProcActive = false,
 	}
 
@@ -339,6 +341,11 @@ local function ResolveCooldownViewerIconParts(itemFrame)
 	return nil, nil
 end
 
+local function IsEssentialUtilityViewer(viewer)
+	local viewerName = viewer and type(viewer.GetName) == "function" and viewer:GetName() or nil
+	return viewerName == "EssentialCooldownViewer" or viewerName == "UtilityCooldownViewer"
+end
+
 local function CollectKnownViewerRegions(styleData)
 	if not styleData or not styleData.cooldownFrame then
 		return
@@ -387,8 +394,8 @@ local function DeduplicateRegions(regions)
 end
 
 function Skin:BuildCooldownViewerData(itemFrame)
-	if itemFrame.BUSkinData then
-		return itemFrame.BUSkinData
+	if viewerStyleDataByFrame[itemFrame] then
+		return viewerStyleDataByFrame[itemFrame]
 	end
 
 	local iconTexture, iconOwner = ResolveCooldownViewerIconParts(itemFrame)
@@ -422,7 +429,7 @@ function Skin:BuildCooldownViewerData(itemFrame)
 		styleData.swipeTextures = DeduplicateRegions(styleData.swipeTextures)
 	end
 
-	itemFrame.BUSkinData = styleData
+	viewerStyleDataByFrame[itemFrame] = styleData
 	return styleData
 end
 
@@ -432,43 +439,221 @@ function Skin:InstallRuntimeFlashHooks(button)
 	end
 
 	local styleData = self:BuildRuntimeButtonData(button)
-	EnsureFlashFrame(styleData)
+	EnsureRuntimeFlashFrame(styleData)
 
 	if button.Cooldown and type(button.Cooldown.HookScript) == "function" then
 		button.Cooldown:HookScript("OnCooldownDone", function()
-			PlayBorderFlash(styleData, 0)
+			EnsureRuntimeFlashFrame(styleData)
+			if styleData.flashAnimation:IsPlaying() then
+				styleData.flashAnimation:Stop()
+			end
+			styleData.flashFadeIn:SetStartDelay(0)
+			styleData.flashFadeOut:SetStartDelay(0.10)
+			styleData.flashAnimation:Play()
 		end)
 	end
 
 	button.BUSkinFlashHooksInstalled = true
 end
 
-function Skin:InstallViewerFlashHooks(itemFrame)
-	local styleData = self:BuildCooldownViewerData(itemFrame)
-	if not itemFrame or not styleData or styleData.viewerFlashHooksInstalled then
+local function IsEssentialUtilityViewerItem(itemFrame)
+	local viewer = itemFrame and type(itemFrame.GetViewerFrame) == "function" and itemFrame:GetViewerFrame() or nil
+	return itemFrame and itemFrame.CooldownFlash ~= nil and viewer ~= nil and IsEssentialUtilityViewer(viewer)
+end
+
+local function HasManagedPandemicState(pandemicFrame)
+	local state = pandemicFrame and pandemicStateByFrame[pandemicFrame] or nil
+	return state and (
+		state.squareBorder ~= nil
+		or state.suppressed == true
+		or state.itemFrame ~= nil
+	) or false
+end
+
+local function HasManagedViewerState(itemFrame)
+	return itemFrame and (
+		viewerStyleDataByFrame[itemFrame] ~= nil
+		or HasManagedPandemicState(itemFrame.PandemicIcon)
+	)
+end
+
+local function GetPandemicState(pandemicFrame, createIfMissing)
+	if not pandemicFrame then
+		return nil
+	end
+
+	local state = pandemicStateByFrame[pandemicFrame]
+	if not state and createIfMissing then
+		state = {}
+		pandemicStateByFrame[pandemicFrame] = state
+	end
+
+	return state
+end
+
+local function ApplyViewerReadyFlashLayout(styleData)
+	local cooldownFlashFrame = styleData and styleData.ownerFrame and styleData.ownerFrame.CooldownFlash
+	if not cooldownFlashFrame or not styleData.iconTexture then
 		return
 	end
 
-	local cooldownFlashFrame = itemFrame.CooldownFlash
-	if cooldownFlashFrame and cooldownFlashFrame.FlashAnim then
-		EnsureFlashFrame(styleData)
+	if not styleData.cooldownFlashDefaultPoints then
+		styleData.cooldownFlashDefaultPoints = SnapshotFramePoints(cooldownFlashFrame)
+		styleData.cooldownFlashDefaultStrata = cooldownFlashFrame:GetFrameStrata()
+		styleData.cooldownFlashDefaultLevel = cooldownFlashFrame:GetFrameLevel()
+	end
 
-		hooksecurefunc(cooldownFlashFrame.FlashAnim, "Play", function()
-			local startDelay = 0
-			if cooldownFlashFrame.FlashAnim.PlayAnim and type(cooldownFlashFrame.FlashAnim.PlayAnim.GetStartDelay) == "function" then
-				startDelay = cooldownFlashFrame.FlashAnim.PlayAnim:GetStartDelay() or 0
-			end
-			PlayBorderFlash(styleData, startDelay)
-		end)
+	cooldownFlashFrame:ClearAllPoints()
+	cooldownFlashFrame:SetPoint("TOPLEFT", styleData.iconTexture, "TOPLEFT", -6, 6)
+	cooldownFlashFrame:SetPoint("BOTTOMRIGHT", styleData.iconTexture, "BOTTOMRIGHT", 6, -6)
+	cooldownFlashFrame:SetFrameStrata(styleData.iconOwner:GetFrameStrata())
+	cooldownFlashFrame:SetFrameLevel(math.max(styleData.iconOwner:GetFrameLevel() + 6, 1))
+end
 
-		hooksecurefunc(cooldownFlashFrame.FlashAnim, "Stop", function()
-			if styleData.flashAnimation and styleData.flashAnimation:IsPlaying() then
-				styleData.flashAnimation:Stop()
+local function ResetViewerReadyFlashLayout(styleData)
+	local cooldownFlashFrame = styleData and styleData.ownerFrame and styleData.ownerFrame.CooldownFlash
+	if not cooldownFlashFrame then
+		return
+	end
+
+	RestoreFramePoints(cooldownFlashFrame, styleData.cooldownFlashDefaultPoints)
+	if styleData.cooldownFlashDefaultStrata then
+		cooldownFlashFrame:SetFrameStrata(styleData.cooldownFlashDefaultStrata)
+	end
+	if styleData.cooldownFlashDefaultLevel then
+		cooldownFlashFrame:SetFrameLevel(styleData.cooldownFlashDefaultLevel)
+	end
+end
+
+local function EnsurePandemicSquareBorder(pandemicFrame, iconTexture)
+	if not pandemicFrame or not iconTexture then
+		return nil
+	end
+
+	local state = GetPandemicState(pandemicFrame, true)
+	local border = state.squareBorder
+	if not border then
+		border = CreateSquareOutlineFrame(pandemicFrame, 2, 2)
+		state.squareBorder = border
+	end
+
+	border:ClearAllPoints()
+	border:SetPoint("TOPLEFT", iconTexture, "TOPLEFT", -2, 2)
+	border:SetPoint("BOTTOMRIGHT", iconTexture, "BOTTOMRIGHT", 2, -2)
+	border:SetFrameStrata(pandemicFrame:GetFrameStrata())
+	border:SetFrameLevel(math.max(pandemicFrame:GetFrameLevel() + 2, 1))
+	SetBorderColor(border, PANDEMIC_BORDER_COLOR)
+	return border
+end
+
+local function SetPandemicArtSuppressed(pandemicFrame, suppressed)
+	if not pandemicFrame then
+		return
+	end
+
+	local state = GetPandemicState(pandemicFrame, true)
+
+	local borderTexture = pandemicFrame.Border and pandemicFrame.Border.Border or nil
+	local fxFrame = pandemicFrame.FX
+
+	if borderTexture then
+		if suppressed and type(borderTexture.Hide) == "function" then
+			borderTexture:Hide()
+		elseif not suppressed and type(borderTexture.Show) == "function" then
+			borderTexture:Show()
+		end
+	end
+
+	if fxFrame then
+		if suppressed and type(fxFrame.Hide) == "function" then
+			fxFrame:Hide()
+		elseif not suppressed and type(fxFrame.Show) == "function" then
+			fxFrame:Show()
+		end
+	end
+
+	state.suppressed = suppressed and true or false
+end
+
+local function ResetPandemicFrameStyle(pandemicFrame)
+	if not pandemicFrame then
+		return
+	end
+
+	SetPandemicArtSuppressed(pandemicFrame, false)
+	local state = GetPandemicState(pandemicFrame, false)
+	if state and state.squareBorder then
+		state.squareBorder:Hide()
+	end
+	if state then
+		state.suppressed = false
+		state.itemFrame = nil
+	end
+end
+
+local function ApplyPandemicStyleToItem(itemFrame)
+	if not IsEssentialUtilityViewerItem(itemFrame) then
+		return
+	end
+
+	local styleData = Skin:BuildCooldownViewerData(itemFrame)
+	local pandemicFrame = itemFrame and itemFrame.PandemicIcon or nil
+	if not styleData or not pandemicFrame or not styleData.iconTexture then
+		return
+	end
+
+	local state = GetPandemicState(pandemicFrame, true)
+	state.itemFrame = itemFrame
+	local squareBorder = EnsurePandemicSquareBorder(pandemicFrame, styleData.iconTexture)
+	if not state.suppressed then
+		SetPandemicArtSuppressed(pandemicFrame, true)
+	end
+	if squareBorder then
+		squareBorder:Show()
+	end
+end
+
+local function EnsurePandemicFrameHooks(pandemicFrame)
+	local state = GetPandemicState(pandemicFrame, true)
+	if not pandemicFrame or state.hooksInstalled or type(pandemicFrame.HookScript) ~= "function" then
+		return
+	end
+
+	state.hooksInstalled = true
+	pandemicFrame:HookScript("OnShow", function(frame)
+		local frameState = GetPandemicState(frame, false)
+		local itemFrame = frameState and frameState.itemFrame or nil
+		if Skin:IsEnabled() and itemFrame then
+			ApplyPandemicStyleToItem(itemFrame)
+		end
+	end)
+	pandemicFrame:HookScript("OnHide", function(frame)
+		ResetPandemicFrameStyle(frame)
+	end)
+
+	local borderTexture = pandemicFrame.Border and pandemicFrame.Border.Border or nil
+	if borderTexture and type(hooksecurefunc) == "function" and not state.borderShowHookInstalled then
+		state.borderShowHookInstalled = true
+		-- Blizzard can re-show the rounded pandemic border after the pooled frame is already
+		-- active, so we clamp that exact subregion instead of broadening the OnUpdate shim.
+		hooksecurefunc(borderTexture, "Show", function(region)
+			local frameState = GetPandemicState(pandemicFrame, false)
+			if Skin:IsEnabled() and frameState and frameState.itemFrame and type(region.Hide) == "function" then
+				region:Hide()
 			end
 		end)
 	end
 
-	styleData.viewerFlashHooksInstalled = true
+	local fxFrame = pandemicFrame.FX
+	if fxFrame and type(hooksecurefunc) == "function" and not state.fxShowHookInstalled then
+		state.fxShowHookInstalled = true
+		hooksecurefunc(fxFrame, "Show", function(frame)
+			local frameState = GetPandemicState(pandemicFrame, false)
+			if Skin:IsEnabled() and frameState and frameState.itemFrame and type(frame.Hide) == "function" then
+				frame:Hide()
+			end
+		end)
+	end
 end
 
 function Skin:ApplyStyleData(styleData, styleState)
@@ -479,7 +664,6 @@ function Skin:ApplyStyleData(styleData, styleState)
 	styleState = styleState or {}
 
 	local borderFrame = EnsureBorderFrame(styleData)
-	EnsureFlashFrame(styleData)
 
 	ApplyTexCoord(styleData.iconTexture)
 
@@ -511,9 +695,6 @@ function Skin:ApplyStyleData(styleData, styleState)
 	end
 
 	local borderColor = BORDER_COLOR
-	if styleState.isAuraActive then
-		borderColor = AURA_BORDER_COLOR
-	end
 	if styleState.isProcActive then
 		borderColor = PROC_BORDER_COLOR
 	end
@@ -590,8 +771,29 @@ function Skin:ApplyToRuntimeButton(button, entry, visual)
 	self:ApplyStyleData(self:BuildRuntimeButtonData(button), self:GetRuntimeState(entry, visual))
 end
 
-function Skin:ApplyToCooldownViewerItem(itemFrame)
-	if not itemFrame then
+function Skin:ApplyToCooldownViewerItem(itemFrame, allowResetWhenDisabled)
+	if not IsEssentialUtilityViewerItem(itemFrame) then
+		return
+	end
+
+	if not self:IsEnabled() and not allowResetWhenDisabled then
+		return
+	end
+
+	if not self:IsEnabled() then
+		if not HasManagedViewerState(itemFrame) then
+			return
+		end
+
+		local styleData = viewerStyleDataByFrame[itemFrame]
+		if styleData then
+			self:ResetStyleData(styleData)
+			ResetViewerReadyFlashLayout(styleData)
+		end
+		if itemFrame.PandemicIcon and HasManagedPandemicState(itemFrame.PandemicIcon) then
+			ResetPandemicFrameStyle(itemFrame.PandemicIcon)
+		end
+		RestoreProcAlertArt(itemFrame)
 		return
 	end
 
@@ -600,36 +802,51 @@ function Skin:ApplyToCooldownViewerItem(itemFrame)
 		return
 	end
 
-	if not self:IsEnabled() then
-		self:ResetStyleData(styleData)
-		if itemFrame.CooldownFlash and itemFrame.CooldownFlash.Flipbook and type(itemFrame.CooldownFlash.Flipbook.Show) == "function" then
-			itemFrame.CooldownFlash.Flipbook:Show()
-		end
-		RestoreProcAlertArt(itemFrame)
-		return
-	end
-
-	self:InstallViewerFlashHooks(itemFrame)
 	SuppressProcAlertArt(itemFrame)
-	if itemFrame.CooldownFlash and itemFrame.CooldownFlash.Flipbook and type(itemFrame.CooldownFlash.Flipbook.Hide) == "function" then
-		itemFrame.CooldownFlash.Flipbook:Hide()
-	end
+	ApplyViewerReadyFlashLayout(styleData)
 	self:ApplyStyleData(styleData, ResolveViewerStyleState(itemFrame))
+	if itemFrame.PandemicIcon then
+		EnsurePandemicFrameHooks(itemFrame.PandemicIcon)
+		ApplyPandemicStyleToItem(itemFrame)
+	end
 end
 
-function Skin:RefreshActiveCooldownViewerItems()
+function Skin:RefreshActiveCooldownViewerItems(allowResetWhenDisabled)
 	for _, frameName in ipairs(COOLDOWN_VIEWER_FRAME_NAMES) do
 		local viewer = _G[frameName]
-		if viewer and viewer.itemFramePool and type(viewer.itemFramePool.EnumerateActive) == "function" then
-			for itemFrame in viewer.itemFramePool:EnumerateActive() do
-				self:ApplyToCooldownViewerItem(itemFrame)
-			end
-		end
+		self:ApplyToViewer(viewer, allowResetWhenDisabled)
 	end
 end
 
 local function IsCooldownViewerItemFrame(frame)
 	return frame and type(frame.GetViewerFrame) == "function" and frame:GetViewerFrame() ~= nil
+end
+
+function Skin:ApplyToViewer(viewer, allowResetWhenDisabled)
+	if not viewer or not IsEssentialUtilityViewer(viewer) or not viewer.itemFramePool or type(viewer.itemFramePool.EnumerateActive) ~= "function" then
+		return
+	end
+
+	for itemFrame in viewer.itemFramePool:EnumerateActive() do
+		self:ApplyToCooldownViewerItem(itemFrame, allowResetWhenDisabled)
+	end
+end
+
+function Skin:RefreshViewerPandemicFrames(viewer)
+	if not self:IsEnabled() then
+		return
+	end
+
+	if not viewer or not IsEssentialUtilityViewer(viewer) or not viewer.itemFramePool or type(viewer.itemFramePool.EnumerateActive) ~= "function" then
+		return
+	end
+
+	for itemFrame in viewer.itemFramePool:EnumerateActive() do
+		if itemFrame.PandemicIcon and itemFrame.PandemicIcon.IsShown and itemFrame.PandemicIcon:IsShown() then
+			EnsurePandemicFrameHooks(itemFrame.PandemicIcon)
+			ApplyPandemicStyleToItem(itemFrame)
+		end
+	end
 end
 
 function Skin:InstallHooks()
@@ -639,64 +856,128 @@ function Skin:InstallHooks()
 
 	if CooldownViewerMixin and type(CooldownViewerMixin.OnAcquireItemFrame) == "function" then
 		hooksecurefunc(CooldownViewerMixin, "OnAcquireItemFrame", function(_, itemFrame)
+			if not Skin:IsEnabled() then
+				return
+			end
 			Skin:ApplyToCooldownViewerItem(itemFrame)
 		end)
 	end
 
 	if CooldownViewerMixin and type(CooldownViewerMixin.RefreshData) == "function" then
 		hooksecurefunc(CooldownViewerMixin, "RefreshData", function(viewer)
-			if viewer and viewer.itemFramePool and type(viewer.itemFramePool.EnumerateActive) == "function" then
-				for itemFrame in viewer.itemFramePool:EnumerateActive() do
-					Skin:ApplyToCooldownViewerItem(itemFrame)
-				end
+			if not Skin:IsEnabled() then
+				return
 			end
+			Skin:ApplyToViewer(viewer)
 		end)
 	end
 
 	if CooldownViewerMixin and type(CooldownViewerMixin.RefreshLayout) == "function" then
 		hooksecurefunc(CooldownViewerMixin, "RefreshLayout", function(viewer)
-			if viewer and viewer.itemFramePool and type(viewer.itemFramePool.EnumerateActive) == "function" then
-				for itemFrame in viewer.itemFramePool:EnumerateActive() do
-					Skin:ApplyToCooldownViewerItem(itemFrame)
-				end
+			if not Skin:IsEnabled() then
+				return
 			end
+			Skin:ApplyToViewer(viewer)
+		end)
+	end
+
+	if CooldownViewerMixin and type(CooldownViewerMixin.OnUpdate) == "function" then
+		hooksecurefunc(CooldownViewerMixin, "OnUpdate", function(viewer)
+			if not Skin:IsEnabled() then
+				return
+			end
+			-- Blizzard's pooled pandemic frame can paint before the show/setup hooks are enough
+			-- on their own, so we keep this narrow refresh assist to catch shown pandemic frames
+			-- and suppress the rounded art before it lingers on screen.
+			Skin:RefreshViewerPandemicFrames(viewer)
+		end)
+	end
+
+	if CooldownViewerMixin and type(CooldownViewerMixin.SetupPandemicStateFrameForItem) == "function" then
+		hooksecurefunc(CooldownViewerMixin, "SetupPandemicStateFrameForItem", function(_, itemFrame)
+			if not Skin:IsEnabled() then
+				return
+			end
+			if itemFrame and itemFrame.PandemicIcon then
+				EnsurePandemicFrameHooks(itemFrame.PandemicIcon)
+			end
+			ApplyPandemicStyleToItem(itemFrame)
+		end)
+	end
+
+	if CooldownViewerMixin and type(CooldownViewerMixin.AnchorPandemicStateFrame) == "function" then
+		hooksecurefunc(CooldownViewerMixin, "AnchorPandemicStateFrame", function(viewer, pandemicFrame, itemFrame)
+			if not Skin:IsEnabled() then
+				return
+			end
+			if pandemicFrame then
+				EnsurePandemicFrameHooks(pandemicFrame)
+			end
+			ApplyPandemicStyleToItem(itemFrame)
 		end)
 	end
 
 	if CooldownViewerCooldownItemMixin and type(CooldownViewerCooldownItemMixin.RefreshData) == "function" then
 		hooksecurefunc(CooldownViewerCooldownItemMixin, "RefreshData", function(itemFrame)
+			if not Skin:IsEnabled() then
+				return
+			end
 			Skin:ApplyToCooldownViewerItem(itemFrame)
 		end)
 	end
 
 	if CooldownViewerCooldownItemMixin and type(CooldownViewerCooldownItemMixin.OnSpellActivationOverlayGlowShowEvent) == "function" then
 		hooksecurefunc(CooldownViewerCooldownItemMixin, "OnSpellActivationOverlayGlowShowEvent", function(itemFrame)
+			if not Skin:IsEnabled() then
+				return
+			end
 			Skin:ApplyToCooldownViewerItem(itemFrame)
 		end)
 	end
 
 	if CooldownViewerCooldownItemMixin and type(CooldownViewerCooldownItemMixin.OnSpellActivationOverlayGlowHideEvent) == "function" then
 		hooksecurefunc(CooldownViewerCooldownItemMixin, "OnSpellActivationOverlayGlowHideEvent", function(itemFrame)
+			if not Skin:IsEnabled() then
+				return
+			end
 			Skin:ApplyToCooldownViewerItem(itemFrame)
 		end)
 	end
 
-	if CooldownViewerBuffIconItemMixin and type(CooldownViewerBuffIconItemMixin.RefreshData) == "function" then
-		hooksecurefunc(CooldownViewerBuffIconItemMixin, "RefreshData", function(itemFrame)
-			Skin:ApplyToCooldownViewerItem(itemFrame)
+	if CooldownViewerItemMixin and type(CooldownViewerItemMixin.ShowPandemicStateFrame) == "function" then
+		hooksecurefunc(CooldownViewerItemMixin, "ShowPandemicStateFrame", function(itemFrame)
+			if not Skin:IsEnabled() then
+				return
+			end
+			if itemFrame and itemFrame.PandemicIcon then
+				EnsurePandemicFrameHooks(itemFrame.PandemicIcon)
+			end
+			ApplyPandemicStyleToItem(itemFrame)
 		end)
 	end
 
-	if CooldownViewerBuffBarItemMixin and type(CooldownViewerBuffBarItemMixin.RefreshData) == "function" then
-		hooksecurefunc(CooldownViewerBuffBarItemMixin, "RefreshData", function(itemFrame)
-			Skin:ApplyToCooldownViewerItem(itemFrame)
+	if CooldownViewerItemMixin and type(CooldownViewerItemMixin.HidePandemicStateFrame) == "function" then
+		hooksecurefunc(CooldownViewerItemMixin, "HidePandemicStateFrame", function(itemFrame)
+			if itemFrame and itemFrame.PandemicIcon and HasManagedPandemicState(itemFrame.PandemicIcon) then
+				ResetPandemicFrameStyle(itemFrame.PandemicIcon)
+			end
+		end)
+	end
+
+	if CooldownViewerMixin and type(CooldownViewerMixin.HidePandemicStateFrame) == "function" then
+		hooksecurefunc(CooldownViewerMixin, "HidePandemicStateFrame", function(_, stateFrame)
+			if HasManagedPandemicState(stateFrame) then
+				ResetPandemicFrameStyle(stateFrame)
+			end
 		end)
 	end
 
 	if ActionButtonSpellAlertManager and type(ActionButtonSpellAlertManager.ShowAlert) == "function" then
 		hooksecurefunc(ActionButtonSpellAlertManager, "ShowAlert", function(_, actionButton)
 			if IsCooldownViewerItemFrame(actionButton) then
-				SuppressProcAlertArt(actionButton)
+				if not Skin:IsEnabled() then
+					return
+				end
 				Skin:ApplyToCooldownViewerItem(actionButton)
 			end
 		end)
@@ -705,7 +986,9 @@ function Skin:InstallHooks()
 	if ActionButtonSpellAlertManager and type(ActionButtonSpellAlertManager.HideAlert) == "function" then
 		hooksecurefunc(ActionButtonSpellAlertManager, "HideAlert", function(_, actionButton)
 			if IsCooldownViewerItemFrame(actionButton) then
-				SuppressProcAlertArt(actionButton)
+				if not Skin:IsEnabled() then
+					return
+				end
 				Skin:ApplyToCooldownViewerItem(actionButton)
 			end
 		end)
@@ -716,9 +999,12 @@ end
 
 function Skin:Initialize()
 	self:InstallHooks()
-	self:RefreshActiveCooldownViewerItems()
+	if self:IsEnabled() then
+		self:RefreshActiveCooldownViewerItems(false)
+	end
 end
 
 function Skin:RefreshAll()
-	self:Initialize()
+	self:InstallHooks()
+	self:RefreshActiveCooldownViewerItems(not self:IsEnabled())
 end
