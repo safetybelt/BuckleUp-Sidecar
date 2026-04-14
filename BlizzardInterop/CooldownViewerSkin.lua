@@ -13,7 +13,6 @@ local ICON_TEX_COORD = {
 
 local BORDER_COLOR = { r = 0.10, g = 0.10, b = 0.10, a = 0.96 }
 local PROC_BORDER_COLOR = { r = 1.00, g = 0.91, b = 0.38, a = 1.00 }
-local FLASH_BORDER_COLOR = { r = 0.95, g = 0.82, b = 0.25, a = 1.00 }
 local PANDEMIC_BORDER_COLOR = { r = 0.92, g = 0.22, b = 0.22, a = 0.98 }
 
 local SQUARE_SWIPE_TEXTURE = "Interface\\Buttons\\WHITE8X8"
@@ -165,58 +164,6 @@ local function EnsureBorderFrame(styleData)
 	return borderFrame
 end
 
-local function EnsureRuntimeFlashFrame(styleData)
-	if not styleData or styleData.flashFrame then
-		return styleData and styleData.flashFrame or nil
-	end
-
-	local parent = styleData.iconOwner or styleData.ownerFrame
-	if not parent then
-		return nil
-	end
-
-	local flashFrame = CreateSquareOutlineFrame(parent, 3, 4)
-	flashFrame:SetPoint("TOPLEFT", styleData.iconTexture, "TOPLEFT", -3, 3)
-	flashFrame:SetPoint("BOTTOMRIGHT", styleData.iconTexture, "BOTTOMRIGHT", 3, -3)
-	SetBorderColor(flashFrame, FLASH_BORDER_COLOR)
-	flashFrame:SetAlpha(0)
-	flashFrame:Hide()
-
-	local animationGroup = flashFrame:CreateAnimationGroup()
-
-	local fadeIn = animationGroup:CreateAnimation("Alpha")
-	fadeIn:SetOrder(1)
-	fadeIn:SetFromAlpha(0)
-	fadeIn:SetToAlpha(1)
-	fadeIn:SetDuration(0.08)
-
-	local fadeOut = animationGroup:CreateAnimation("Alpha")
-	fadeOut:SetOrder(2)
-	fadeOut:SetFromAlpha(1)
-	fadeOut:SetToAlpha(0)
-	fadeOut:SetDuration(0.45)
-	fadeOut:SetStartDelay(0.02)
-
-	animationGroup:SetScript("OnPlay", function()
-		flashFrame:Show()
-		flashFrame:SetAlpha(0)
-	end)
-	animationGroup:SetScript("OnFinished", function()
-		flashFrame:SetAlpha(0)
-		flashFrame:Hide()
-	end)
-	animationGroup:SetScript("OnStop", function()
-		flashFrame:SetAlpha(0)
-		flashFrame:Hide()
-	end)
-
-	styleData.flashFrame = flashFrame
-	styleData.flashAnimation = animationGroup
-	styleData.flashFadeIn = fadeIn
-	styleData.flashFadeOut = fadeOut
-	return flashFrame
-end
-
 SetBorderColor = function(frame, colorInfo)
 	if not frame or not colorInfo then
 		return
@@ -314,6 +261,7 @@ function Skin:BuildRuntimeButtonData(button)
 	end
 
 	local styleData = {
+		isRuntimeButton = true,
 		ownerFrame = button,
 		iconOwner = button,
 		iconTexture = button.Icon,
@@ -428,6 +376,7 @@ function Skin:BuildCooldownViewerData(itemFrame)
 	-- assets. This is intentionally a narrow interop shim, not a broad frame-skinning
 	-- framework, and each discovered region is optional.
 	local styleData = {
+		isRuntimeButton = false,
 		ownerFrame = itemFrame,
 		iconOwner = iconOwner,
 		iconTexture = iconTexture,
@@ -447,29 +396,6 @@ function Skin:BuildCooldownViewerData(itemFrame)
 
 	viewerStyleDataByFrame[itemFrame] = styleData
 	return styleData
-end
-
-function Skin:InstallRuntimeFlashHooks(button)
-	if not button or button.BUSkinFlashHooksInstalled then
-		return
-	end
-
-	local styleData = self:BuildRuntimeButtonData(button)
-	EnsureRuntimeFlashFrame(styleData)
-
-	if button.Cooldown and type(button.Cooldown.HookScript) == "function" then
-		button.Cooldown:HookScript("OnCooldownDone", function()
-			EnsureRuntimeFlashFrame(styleData)
-			if styleData.flashAnimation:IsPlaying() then
-				styleData.flashAnimation:Stop()
-			end
-			styleData.flashFadeIn:SetStartDelay(0)
-			styleData.flashFadeOut:SetStartDelay(0.10)
-			styleData.flashAnimation:Play()
-		end)
-	end
-
-	button.BUSkinFlashHooksInstalled = true
 end
 
 local function IsSupportedViewerItem(itemFrame)
@@ -512,37 +438,69 @@ local function GetPandemicState(pandemicFrame, createIfMissing)
 	return state
 end
 
-local function ApplyViewerReadyFlashLayout(styleData)
-	local cooldownFlashFrame = styleData and styleData.ownerFrame and styleData.ownerFrame.CooldownFlash
-	if not cooldownFlashFrame or not styleData.iconTexture then
-		return
-	end
-
-	if not styleData.cooldownFlashDefaultPoints then
-		styleData.cooldownFlashDefaultPoints = SnapshotFramePoints(cooldownFlashFrame)
-		styleData.cooldownFlashDefaultStrata = cooldownFlashFrame:GetFrameStrata()
-		styleData.cooldownFlashDefaultLevel = cooldownFlashFrame:GetFrameLevel()
-	end
-
-	cooldownFlashFrame:ClearAllPoints()
-	cooldownFlashFrame:SetPoint("TOPLEFT", styleData.iconTexture, "TOPLEFT", -6, 6)
-	cooldownFlashFrame:SetPoint("BOTTOMRIGHT", styleData.iconTexture, "BOTTOMRIGHT", 6, -6)
-	cooldownFlashFrame:SetFrameStrata(styleData.iconOwner:GetFrameStrata())
-	cooldownFlashFrame:SetFrameLevel(math.max(styleData.iconOwner:GetFrameLevel() + 6, 1))
-end
-
-local function ResetViewerReadyFlashLayout(styleData)
+local function SuppressViewerReadyFlash(styleData)
 	local cooldownFlashFrame = styleData and styleData.ownerFrame and styleData.ownerFrame.CooldownFlash
 	if not cooldownFlashFrame then
 		return
 	end
 
-	RestoreFramePoints(cooldownFlashFrame, styleData.cooldownFlashDefaultPoints)
-	if styleData.cooldownFlashDefaultStrata then
-		cooldownFlashFrame:SetFrameStrata(styleData.cooldownFlashDefaultStrata)
+	-- Unified style currently suppresses Blizzard viewer ready-flash outright rather than
+	-- trying to replace it. Sidecar does not own a production ready-flash system today.
+	if cooldownFlashFrame.FlashAnim and type(cooldownFlashFrame.FlashAnim.Stop) == "function" then
+		cooldownFlashFrame.FlashAnim:Stop()
 	end
-	if styleData.cooldownFlashDefaultLevel then
-		cooldownFlashFrame:SetFrameLevel(styleData.cooldownFlashDefaultLevel)
+	if cooldownFlashFrame.Flipbook and type(cooldownFlashFrame.Flipbook.Hide) == "function" then
+		cooldownFlashFrame.Flipbook:Hide()
+	end
+	if type(cooldownFlashFrame.Hide) == "function" then
+		cooldownFlashFrame:Hide()
+	end
+end
+
+local function RestoreViewerReadyFlashPresentation(styleData)
+	local cooldownFlashFrame = styleData and styleData.ownerFrame and styleData.ownerFrame.CooldownFlash
+	if not cooldownFlashFrame then
+		return
+	end
+
+	if type(cooldownFlashFrame.Show) == "function" then
+		cooldownFlashFrame:Show()
+	end
+	if cooldownFlashFrame.Flipbook and type(cooldownFlashFrame.Flipbook.Show) == "function" then
+		cooldownFlashFrame.Flipbook:Show()
+	end
+end
+
+local function EnsureViewerReadyFlashSuppressionHooks(styleData)
+	local cooldownFlashFrame = styleData and styleData.ownerFrame and styleData.ownerFrame.CooldownFlash
+	if not cooldownFlashFrame or styleData.viewerReadyFlashHooksInstalled then
+		return
+	end
+
+	styleData.viewerReadyFlashHooksInstalled = true
+
+	if cooldownFlashFrame.FlashAnim and type(hooksecurefunc) == "function" then
+		hooksecurefunc(cooldownFlashFrame.FlashAnim, "Play", function()
+			if Skin:IsEnabled() then
+				SuppressViewerReadyFlash(styleData)
+			end
+		end)
+	end
+
+	if type(cooldownFlashFrame.HookScript) == "function" then
+		cooldownFlashFrame:HookScript("OnShow", function()
+			if Skin:IsEnabled() then
+				SuppressViewerReadyFlash(styleData)
+			end
+		end)
+	end
+
+	if cooldownFlashFrame.Flipbook and type(hooksecurefunc) == "function" then
+		hooksecurefunc(cooldownFlashFrame.Flipbook, "Show", function()
+			if Skin:IsEnabled() then
+				SuppressViewerReadyFlash(styleData)
+			end
+		end)
 	end
 end
 
@@ -691,11 +649,17 @@ function Skin:ApplyStyleData(styleData, styleState)
 	if styleData.cooldownFrame and type(styleData.cooldownFrame.SetUseCircularEdge) == "function" then
 		styleData.cooldownFrame:SetUseCircularEdge(false)
 	end
+	-- Sidecar runtime buttons do not implement a production cooldown-ready flash. In
+	-- unified style we only suppress the built-in cooldown completion visuals so runtime
+	-- buttons stay visually aligned with the rest of the theme.
+	if styleData.isRuntimeButton and styleData.cooldownFrame and type(styleData.cooldownFrame.SetDrawBling) == "function" then
+		styleData.cooldownFrame:SetDrawBling(false)
+	end
+	if styleData.isRuntimeButton and styleData.cooldownFrame and type(styleData.cooldownFrame.SetDrawEdge) == "function" then
+		styleData.cooldownFrame:SetDrawEdge(false)
+	end
 	if styleData.cooldownFrame and type(styleData.cooldownFrame.SetSwipeTexture) == "function" then
 		styleData.cooldownFrame:SetSwipeTexture(SQUARE_SWIPE_TEXTURE, 1, 1, 1, 1)
-	end
-	if styleData.cooldownFrame and type(styleData.cooldownFrame.SetDrawBling) == "function" then
-		styleData.cooldownFrame:SetDrawBling(false)
 	end
 
 	for _, maskRegion in ipairs(styleData.maskRegions or {}) do
@@ -728,9 +692,6 @@ function Skin:ApplyStyleData(styleData, styleState)
 		borderFrame:Show()
 	end
 
-	if styleData.flashFrame then
-		styleData.flashFrame:SetAlpha(0)
-	end
 end
 
 function Skin:ResetStyleData(styleData)
@@ -742,6 +703,12 @@ function Skin:ResetStyleData(styleData)
 
 	if styleData.cooldownFrame and type(styleData.cooldownFrame.SetUseCircularEdge) == "function" then
 		styleData.cooldownFrame:SetUseCircularEdge(true)
+	end
+	if styleData.isRuntimeButton and styleData.cooldownFrame and type(styleData.cooldownFrame.SetDrawBling) == "function" then
+		styleData.cooldownFrame:SetDrawBling(true)
+	end
+	if styleData.isRuntimeButton and styleData.cooldownFrame and type(styleData.cooldownFrame.SetDrawEdge) == "function" then
+		styleData.cooldownFrame:SetDrawEdge(true)
 	end
 	if styleData.cooldownFrame and type(styleData.cooldownFrame.SetSwipeTexture) == "function" then
 		styleData.cooldownFrame:SetSwipeTexture(styleData.defaultSwipeTexture or DEFAULT_VIEWER_SWIPE_TEXTURE, 1, 1, 1, 1)
@@ -777,12 +744,6 @@ function Skin:ResetStyleData(styleData)
 	if styleData.borderFrame then
 		styleData.borderFrame:Hide()
 	end
-	if styleData.flashFrame then
-		if styleData.flashAnimation and styleData.flashAnimation:IsPlaying() then
-			styleData.flashAnimation:Stop()
-		end
-		styleData.flashFrame:Hide()
-	end
 end
 
 function Skin:ApplyToRuntimeButton(button, entry, visual)
@@ -795,7 +756,6 @@ function Skin:ApplyToRuntimeButton(button, entry, visual)
 		return
 	end
 
-	self:InstallRuntimeFlashHooks(button)
 	self:ApplyStyleData(self:BuildRuntimeButtonData(button), self:GetRuntimeState(entry, visual))
 end
 
@@ -816,7 +776,7 @@ function Skin:ApplyToCooldownViewerItem(itemFrame, allowResetWhenDisabled)
 		local styleData = viewerStyleDataByFrame[itemFrame]
 		if styleData then
 			self:ResetStyleData(styleData)
-			ResetViewerReadyFlashLayout(styleData)
+			RestoreViewerReadyFlashPresentation(styleData)
 		end
 		if itemFrame.PandemicIcon and HasManagedPandemicState(itemFrame.PandemicIcon) then
 			ResetPandemicFrameStyle(itemFrame.PandemicIcon)
@@ -831,7 +791,8 @@ function Skin:ApplyToCooldownViewerItem(itemFrame, allowResetWhenDisabled)
 	end
 
 	SuppressProcAlertArt(itemFrame)
-	ApplyViewerReadyFlashLayout(styleData)
+	EnsureViewerReadyFlashSuppressionHooks(styleData)
+	SuppressViewerReadyFlash(styleData)
 	self:ApplyStyleData(styleData, ResolveViewerStyleState(itemFrame))
 	if itemFrame.PandemicIcon and IsEssentialUtilityViewerItem(itemFrame) then
 		EnsurePandemicFrameHooks(itemFrame.PandemicIcon)

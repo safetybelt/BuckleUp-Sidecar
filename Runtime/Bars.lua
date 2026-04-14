@@ -247,13 +247,9 @@ function Bars:CreateButton(parent)
 
 	button.Cooldown = CreateFrame("Cooldown", nil, button, "CooldownFrameTemplate")
 	button.Cooldown:SetAllPoints()
-	button.Cooldown:SetDrawBling(false)
 	button.Cooldown:SetHideCountdownNumbers(false)
 	if button.Cooldown.SetSwipeTexture then
 		button.Cooldown:SetSwipeTexture("Interface\\HUD\\UI-HUD-CoolDownManager-Icon-Swipe")
-	end
-	if button.Cooldown.SetDrawEdge then
-		button.Cooldown:SetDrawEdge(false)
 	end
 	if button.Cooldown.HookScript then
 		button.Cooldown:HookScript("OnShow", function()
