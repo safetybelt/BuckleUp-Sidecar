@@ -9,6 +9,7 @@ local TILE_GAP = 8
 local LANE_PADDING = 10
 local MIN_LANE_HEIGHT = 78
 local modifiedItemHookInstalled = false
+local addEntryDialogInitialized = false
 
 local function EnsureEntry(entryID)
 	local catalogEntry = addon.Catalog:GetEntry(entryID)
@@ -88,6 +89,10 @@ local function HideIndicator(panel)
 	if panel and panel.Indicator then
 		panel.Indicator:Hide()
 	end
+end
+
+local function AddCustomEntryByKind(kind, rawID, onComplete)
+	return addon.EntryIntake:AddByKind(kind, rawID, { onComplete = onComplete })
 end
 
 local function EnsureDragOverlay(self)
@@ -201,7 +206,7 @@ local function UpdateLaneActionVisibility(lane)
 	end
 end
 
-local function OpenAddEntryDialog(kind)
+local function EnsureAddEntryDialogHooks()
 	if not modifiedItemHookInstalled and type(hooksecurefunc) == "function" then
 		modifiedItemHookInstalled = true
 		hooksecurefunc("HandleModifiedItemClick", function(link)
@@ -209,25 +214,69 @@ local function OpenAddEntryDialog(kind)
 				return
 			end
 
-			for _, dialogKey in ipairs({ "BUCKLEUPSIDECAR_ADD_ITEM", "BUCKLEUPSIDECAR_ADD_SPELL" }) do
-				local popup = StaticPopup_FindVisible(dialogKey)
-				if popup then
-					local editBox = popup.editBox or popup.EditBox
-					if editBox and editBox:HasFocus() then
-						editBox:SetText(link)
-						editBox:SetFocus()
-						editBox:HighlightText()
-						break
-					end
+			local popup = StaticPopup_FindVisible("BUCKLEUPSIDECAR_ADD_ENTRY")
+			if popup then
+				local editBox = popup.editBox or popup.EditBox
+				if editBox and editBox:HasFocus() then
+					editBox:SetText(link)
+					editBox:SetFocus()
+					editBox:HighlightText()
 				end
 			end
 		end)
 	end
+end
 
-	local dialogKey = kind == "spell" and "BUCKLEUPSIDECAR_ADD_SPELL" or "BUCKLEUPSIDECAR_ADD_ITEM"
-	if not StaticPopupDialogs[dialogKey] then
-		StaticPopupDialogs[dialogKey] = {
-			text = kind == "spell" and "Add spell by ID" or "Add item by ID",
+local function ParseManualEntryInput(rawText)
+	local trimmedText = strtrim(rawText or "")
+	if trimmedText == "" then
+		return nil, "empty"
+	end
+
+	local explicitSpellID = tonumber(trimmedText:match("^[Ss][Pp][Ee][Ll][Ll]%s*[:#]%s*(%d+)$"))
+	if explicitSpellID then
+		return "spell", explicitSpellID
+	end
+
+	local explicitItemID = tonumber(trimmedText:match("^[Ii][Tt][Ee][Mm]%s*[:#]%s*(%d+)$"))
+	if explicitItemID then
+		return "item", explicitItemID
+	end
+
+	local linkedSpellID = tonumber(trimmedText:match("spell:(%d+)"))
+	if linkedSpellID then
+		return "spell", linkedSpellID
+	end
+
+	local linkedItemID = tonumber(trimmedText:match("item:(%d+)"))
+	if linkedItemID then
+		return "item", linkedItemID
+	end
+
+	local numericID = tonumber(trimmedText)
+	if not numericID then
+		return nil, "invalid"
+	end
+
+	local isValidSpell = addon.Util.IsValidSpellID(numericID)
+	local isExistingItem = addon.Util.DoesItemExistSafe and addon.Util.DoesItemExistSafe(numericID)
+	if isValidSpell and isExistingItem then
+		return nil, "ambiguous"
+	end
+	if isValidSpell then
+		return "spell", numericID
+	end
+
+	return "item", numericID
+end
+
+local function OpenAddEntryDialog()
+	EnsureAddEntryDialogHooks()
+
+	if not addEntryDialogInitialized then
+		addEntryDialogInitialized = true
+		StaticPopupDialogs["BUCKLEUPSIDECAR_ADD_ENTRY"] = {
+			text = "Add Entry\nEnter spell/item ID, shift-click a link, or use spell:123 / item:123",
 			button1 = ADD,
 			button2 = CANCEL,
 			hasEditBox = true,
@@ -274,56 +323,19 @@ local function OpenAddEntryDialog(kind)
 			OnAccept = function(self)
 				local editBox = self.editBox or self.EditBox
 				local rawText = (editBox and editBox:GetText()) or ""
-				local rawID = tonumber(rawText)
-				if not rawID then
-					if kind == "item" then
-						rawID = tonumber(rawText:match("item:(%d+)"))
-					elseif kind == "spell" then
-						rawID = tonumber(rawText:match("spell:(%d+)"))
+				local kind, rawIDOrReason = ParseManualEntryInput(rawText)
+				if not kind then
+					if addon.Print then
+						if rawIDOrReason == "ambiguous" then
+							addon.Print("That ID could be either a spell or an item. Use spell:<id> or item:<id>.")
+						else
+							addon.Print("Enter a spell ID, item ID, spell link, or item link.")
+						end
 					end
-				end
-				if not rawID then
 					return
 				end
 
-				if kind == "spell" then
-					if not addon.Util.IsValidSpellID(rawID) then
-						if addon.Print then
-							addon.Print("That spell ID could not be validated. Try a real spell ID.")
-						end
-						return
-					end
-					addon.Profile:EnsureEntry({
-						id = addon.Util.MakeEntryID("spell", rawID),
-						kind = "spell",
-						spellID = rawID,
-						containerID = addon.Constants.HIDDEN_CONTAINER_ID,
-					})
-					addon.Catalog:Rebuild()
-					addon.Bars:RefreshRuntime()
-					SettingsIntegration:RefreshPanel()
-					return
-				else
-					addon.Util.ValidateItemIDAsync(rawID, function(validItemID)
-						addon.Profile:EnsureEntry({
-							id = addon.Util.MakeEntryID("item", validItemID),
-							kind = "item",
-							itemID = validItemID,
-							containerID = addon.Constants.HIDDEN_CONTAINER_ID,
-						})
-						addon.Catalog:Rebuild()
-						addon.Bars:RefreshRuntime()
-						SettingsIntegration:RefreshPanel()
-						if addon.Print then
-							addon.Print("Added item:" .. tostring(validItemID))
-						end
-					end, function()
-						if addon.Print then
-							addon.Print("That item ID could not be validated. Try a real item ID or shift-click a real item.")
-						end
-					end)
-					return
-				end
+				AddCustomEntryByKind(kind, rawIDOrReason)
 			end,
 			EditBoxOnEnterPressed = function(self)
 				local parent = self:GetParent()
@@ -334,7 +346,7 @@ local function OpenAddEntryDialog(kind)
 		}
 	end
 
-	StaticPopup_Show(dialogKey)
+	StaticPopup_Show("BUCKLEUPSIDECAR_ADD_ENTRY")
 end
 
 local function OpenBlizzardEditMode()
@@ -411,6 +423,9 @@ function SettingsIntegration:CreateTile(parent)
 	local button = CreateFrame("Button", nil, parent)
 	button:SetSize(TILE_SIZE, TILE_SIZE)
 	button:RegisterForDrag("LeftButton")
+	button:SetScript("OnReceiveDrag", function()
+		SettingsIntegration:TryHandleExternalDrop()
+	end)
 
 	button.Icon = button:CreateTexture(nil, "BACKGROUND")
 	button.Icon:SetAllPoints()
@@ -437,6 +452,14 @@ end
 function SettingsIntegration:CreateLane(parent)
 	local lane = CreateFrame("Frame", nil, parent)
 	lane:EnableMouse(true)
+	lane:SetScript("OnReceiveDrag", function()
+		SettingsIntegration:TryHandleExternalDrop()
+	end)
+	lane:SetScript("OnMouseUp", function(_, button)
+		if button == "LeftButton" then
+			SettingsIntegration:TryHandleExternalDrop()
+		end
+	end)
 	lane.tiles = {}
 
 	lane.Header = CreateFrame("Frame", nil, lane, "BackdropTemplate")
@@ -575,7 +598,9 @@ function SettingsIntegration:LayoutLane(lane, entries)
 		end)
 		tile:SetScript("OnMouseUp", function(_, button)
 			if button == "LeftButton" then
-				self:FinishDrag()
+				if not self:TryHandleExternalDrop() then
+					self:FinishDrag()
+				end
 			end
 		end)
 		tile:Show()
@@ -700,6 +725,144 @@ function SettingsIntegration:RefreshPanel()
 		self:SetupSidecarLayoutDropdown()
 	end
 	self:RefreshLanes()
+end
+
+function SettingsIntegration:GetHiddenLane()
+	for _, lane in ipairs(self.lanes or {}) do
+		if lane.containerID == addon.Constants.HIDDEN_CONTAINER_ID then
+			return lane
+		end
+	end
+end
+
+function SettingsIntegration:ClearExternalDropTarget()
+	local hiddenLane = self:GetHiddenLane()
+	if hiddenLane and hiddenLane:IsShown() then
+		hiddenLane.Header:SetBackdropBorderColor(0.30, 0.30, 0.30, 0.95)
+	end
+	self.externalDropTargetActive = nil
+end
+
+function SettingsIntegration:ResolveSpellCursorID(cursorData1, cursorData2, cursorData4)
+	local numericCursorID = addon.Util.NumberOrNil(cursorData1) or addon.Util.NumberOrNil(cursorData2)
+	local explicitSpellID = addon.Util.NumberOrNil(cursorData4)
+	if explicitSpellID and addon.Util.IsValidSpellID(explicitSpellID) then
+		return explicitSpellID
+	end
+
+	local bookType = type(cursorData2) == "string" and cursorData2 or nil
+
+	-- Spellbook drags can expose the spellbook slot/index in cursorData1.
+	-- Resolve through the spellbook API first so we don't mistake a slot like 134
+	-- for an unrelated valid spell ID.
+	if numericCursorID and bookType and type(GetSpellBookItemInfo) == "function" then
+		local _, spellID = GetSpellBookItemInfo(numericCursorID, bookType)
+		local resolvedSpellID = addon.Util.NumberOrNil(spellID)
+		if resolvedSpellID and addon.Util.IsValidSpellID(resolvedSpellID) then
+			return resolvedSpellID
+		end
+	end
+
+	if numericCursorID and addon.Util.IsValidSpellID(numericCursorID) then
+		return numericCursorID
+	end
+end
+
+function SettingsIntegration:GetExternalCursorEntry()
+	local cursorType, cursorData1, cursorData2, cursorData4 = GetCursorInfo()
+	local numericCursorID = addon.Util.NumberOrNil(cursorData1) or addon.Util.NumberOrNil(cursorData2)
+	if cursorType == "spell" then
+		local spellID = self:ResolveSpellCursorID(cursorData1, cursorData2, cursorData4)
+		if not spellID then
+			return nil
+		end
+		return {
+			kind = "spell",
+			id = spellID,
+			icon = addon.Util.GetSpellTextureSafe(spellID),
+			name = addon.Util.GetSpellNameSafe(spellID),
+		}
+	end
+
+	if cursorType == "item" and numericCursorID then
+		if not addon.Util.DoesItemExistSafe(numericCursorID) and type(cursorData2) == "string" then
+			numericCursorID = tonumber(cursorData2:match("item:(%d+)")) or numericCursorID
+		end
+		return {
+			kind = "item",
+			id = numericCursorID,
+			icon = addon.Util.GetItemIconSafe(numericCursorID),
+			name = addon.Util.GetItemNameSafe(numericCursorID),
+		}
+	end
+end
+
+function SettingsIntegration:UpdateExternalDropTarget()
+	if not self.panel or not self.panel:IsShown() or (self.dragState and self.dragState.entryID) then
+		self:ClearExternalDropTarget()
+		return
+	end
+
+	local cursorEntry = self:GetExternalCursorEntry()
+	if not cursorEntry then
+		self:ClearExternalDropTarget()
+		return
+	end
+
+	local isOverOrganizer = IsCursorOverFrame(self.panel) or IsCursorOverFrame(self.panel.Scroll) or IsCursorOverFrame(self.panel.Content)
+	if not isOverOrganizer then
+		for _, lane in ipairs(self.lanes or {}) do
+			if lane:IsShown() and IsCursorOverFrame(lane) then
+				isOverOrganizer = true
+				break
+			end
+		end
+	end
+
+	local hiddenLane = self:GetHiddenLane()
+	if not hiddenLane or not hiddenLane:IsShown() then
+		self.externalDropTargetActive = nil
+		return
+	end
+
+	if isOverOrganizer then
+		hiddenLane.Header:SetBackdropBorderColor(0.12, 0.85, 0.35, 0.95)
+		self.externalDropTargetActive = true
+	else
+		self:ClearExternalDropTarget()
+	end
+end
+
+function SettingsIntegration:TryHandleExternalDrop()
+	if self.dragState and self.dragState.entryID then
+		return false
+	end
+
+	local cursorEntry = self:GetExternalCursorEntry()
+	if not cursorEntry then
+		return false
+	end
+
+	local isOverOrganizer = IsCursorOverFrame(self.panel) or IsCursorOverFrame(self.panel.Scroll) or IsCursorOverFrame(self.panel.Content)
+	if not isOverOrganizer then
+		for _, lane in ipairs(self.lanes or {}) do
+			if lane:IsShown() and IsCursorOverFrame(lane) then
+				isOverOrganizer = true
+				break
+			end
+		end
+	end
+	if not isOverOrganizer then
+		return false
+	end
+
+	AddCustomEntryByKind(cursorEntry.kind, cursorEntry.id, function(success)
+		if success and type(ClearCursor) == "function" then
+			ClearCursor()
+		end
+	end)
+	self:ClearExternalDropTarget()
+	return true
 end
 
 function SettingsIntegration:UpdateDropTarget()
@@ -852,11 +1015,8 @@ function SettingsIntegration:BuildOrganizerPanel(panel)
 				OpenBlizzardEditMode()
 			end)
 			rootDescription:CreateDivider()
-			rootDescription:CreateButton("Add Spell by ID", function()
-				OpenAddEntryDialog("spell")
-			end)
-			rootDescription:CreateButton("Add Item by ID", function()
-				OpenAddEntryDialog("item")
+			rootDescription:CreateButton("Add Entry", function()
+				OpenAddEntryDialog()
 			end)
 			rootDescription:CreateButton("Add Bar", function()
 				local bar, reason = addon.Profile:AddBar()
@@ -870,7 +1030,7 @@ function SettingsIntegration:BuildOrganizerPanel(panel)
 		end)
 	else
 		panel.OptionsButton:SetScript("OnClick", function()
-			OpenAddEntryDialog("spell")
+			OpenAddEntryDialog()
 		end)
 	end
 	panel.OptionsButton:SetScript("OnEnter", function(self)
@@ -889,4 +1049,15 @@ function SettingsIntegration:BuildOrganizerPanel(panel)
 	panel.Content:SetSize(1, 1)
 	panel.Scroll:SetScrollChild(panel.Content)
 	panel.Content:EnableMouse(true)
+	panel.Content:SetScript("OnUpdate", function()
+		SettingsIntegration:UpdateExternalDropTarget()
+	end)
+	panel.Content:SetScript("OnReceiveDrag", function()
+		SettingsIntegration:TryHandleExternalDrop()
+	end)
+	panel.Content:SetScript("OnMouseUp", function(_, button)
+		if button == "LeftButton" then
+			SettingsIntegration:TryHandleExternalDrop()
+		end
+	end)
 end

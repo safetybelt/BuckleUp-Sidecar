@@ -192,17 +192,11 @@ local function HandleSlash(message)
 			Print("Usage: /bus addspell <spellID>")
 			return
 		end
-		if not addon.Util.IsValidSpellID(spellID) then
+		local ok = addon.EntryIntake:AddSpell(spellID, { silent = true })
+		if not ok then
 			Print("That spell ID could not be validated.")
 			return
 		end
-		addon.Profile:EnsureEntry({
-			id = addon.Util.MakeEntryID("spell", spellID),
-			kind = "spell",
-			spellID = spellID,
-			containerID = addon.Constants.HIDDEN_CONTAINER_ID,
-		})
-		RefreshAll()
 		Print("Added spell:" .. tostring(spellID))
 		return
 	end
@@ -213,18 +207,16 @@ local function HandleSlash(message)
 			Print("Usage: /bus additem <itemID>")
 			return
 		end
-		addon.Util.ValidateItemIDAsync(itemID, function(validItemID)
-			addon.Profile:EnsureEntry({
-				id = addon.Util.MakeEntryID("item", validItemID),
-				kind = "item",
-				itemID = validItemID,
-				containerID = addon.Constants.HIDDEN_CONTAINER_ID,
-			})
-			RefreshAll()
-			Print("Added item:" .. tostring(validItemID))
-		end, function()
-			Print("That item ID could not be validated.")
-		end)
+		addon.EntryIntake:AddItem(itemID, {
+			silent = true,
+			onComplete = function(success, validItemID)
+				if not success then
+					Print("That item ID could not be validated.")
+					return
+				end
+				Print("Added item:" .. tostring(validItemID))
+			end,
+		})
 		return
 	end
 
