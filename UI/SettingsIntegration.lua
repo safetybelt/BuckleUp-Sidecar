@@ -190,6 +190,15 @@ end
 function SettingsIntegration:HideSidecarPanel()
 	if self.panel then
 		self.panel:Hide()
+		if self.panel.Scroll then
+			self.panel.Scroll:Hide()
+		end
+		if self.panel.SearchBox then
+			self.panel.SearchBox:Hide()
+		end
+		if self.panel.OptionsButton then
+			self.panel.OptionsButton:Hide()
+		end
 	end
 	self:SetSidecarTabChecked(false)
 	self:RefreshSidecarTabVisual()
@@ -209,6 +218,15 @@ function SettingsIntegration:ShowSidecarPanel()
 	self:HideNativeContent()
 	self:SetupSidecarLayoutDropdown()
 	self.panel:Show()
+	if self.panel.Scroll then
+		self.panel.Scroll:Show()
+	end
+	if self.panel.SearchBox then
+		self.panel.SearchBox:Show()
+	end
+	if self.panel.OptionsButton then
+		self.panel.OptionsButton:Show()
+	end
 	self:RefreshSidecarTabVisual()
 	self:RefreshPanel()
 
@@ -226,8 +244,7 @@ end
 function SettingsIntegration:CreatePanel()
 	local settings = self:GetSettingsFrame()
 	local panel = CreateFrame("Frame", nil, settings.Inset, "BackdropTemplate")
-	panel:SetPoint("TOPLEFT", settings.Inset, "TOPLEFT", 4, -4)
-	panel:SetPoint("BOTTOMRIGHT", settings.Inset, "BOTTOMRIGHT", -4, 4)
+	panel:SetAllPoints(settings.Inset)
 	panel:Hide()
 	self.panel = panel
 

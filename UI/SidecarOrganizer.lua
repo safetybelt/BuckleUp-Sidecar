@@ -7,9 +7,21 @@ addon.SettingsIntegration = SettingsIntegration
 local TILE_SIZE = 38
 local TILE_GAP = 8
 local LANE_PADDING = 10
-local MIN_LANE_HEIGHT = 78
-local modifiedItemHookInstalled = false
-local addEntryDialogInitialized = false
+local HEADER_HEIGHT = 22
+local LANE_WIDTH = 344
+local LANE_CONTAINER_WIDTH = 315
+local LANE_CONTAINER_LEFT = 13
+local LANE_CONTAINER_TOP = 15
+local LANE_CONTAINER_BOTTOM = 10
+local MIN_LANE_CONTENT_HEIGHT = TILE_SIZE
+local SEARCH_LEFT_INSET = 72
+local SEARCH_TOP_INSET = 30
+local SEARCH_WIDTH = 290
+local SEARCH_HEIGHT = 30
+local SCROLL_LEFT_INSET = 17
+local SCROLL_RIGHT_INSET = 30
+local SCROLL_TOP_INSET = 72
+local SCROLL_BOTTOM_INSET = 24
 
 local function EnsureEntry(entryID)
 	local catalogEntry = addon.Catalog:GetEntry(entryID)
@@ -91,8 +103,117 @@ local function HideIndicator(panel)
 	end
 end
 
+local function SetLaneHeaderHover(lane, isHovering)
+	if not lane or not lane.Header then
+		return
+	end
+
+	if isHovering then
+		if lane.Header.LockHighlight then
+			lane.Header:LockHighlight()
+		end
+	else
+		if lane.Header.UnlockHighlight then
+			lane.Header:UnlockHighlight()
+		end
+	end
+end
+
+local function ApplyLaneCollapsedState(lane, collapsed)
+	if not lane then
+		return
+	end
+
+	lane.collapsed = collapsed == true
+	if lane.Header and lane.Header.UpdateCollapsedState then
+		lane.Header:UpdateCollapsedState(lane.collapsed)
+	end
+	if lane.Container then
+		lane.Container:SetShown(not lane.collapsed)
+	end
+	if lane.collapsed then
+		HideIndicator(lane)
+		lane:SetHeight(HEADER_HEIGHT)
+	else
+		local contentHeight = lane.Container and lane.Container:GetHeight() or MIN_LANE_CONTENT_HEIGHT
+		lane:SetHeight(HEADER_HEIGHT + LANE_CONTAINER_TOP + contentHeight + LANE_CONTAINER_BOTTOM)
+	end
+end
+
+local function IsCursorOverExternalDropSurface(lane)
+	if not lane or not lane.acceptsExternalDrop then
+		return false
+	end
+
+	return IsCursorOverFrame(lane.Header) or IsCursorOverFrame(lane.Container)
+end
+
 local function AddCustomEntryByKind(kind, rawID, onComplete)
 	return addon.EntryIntake:AddByKind(kind, rawID, { onComplete = onComplete })
+end
+
+local function OpenLaneNameEditor(lane)
+	if not lane or not lane.containerID or lane.containerID == addon.Constants.HIDDEN_CONTAINER_ID then
+		return
+	end
+
+	if lane.Header and lane.Header.Name then
+		lane.Header.Name:Hide()
+	end
+	if lane.Title then
+		lane.Title:Hide()
+	end
+	lane.NameEditor:SetText(lane.currentLabel or lane.Title:GetText() or "")
+	lane.NameEditor:Show()
+	lane.NameEditor:SetFocus()
+	lane.NameEditor:HighlightText()
+end
+
+local function OpenLaneDeleteDialog(lane)
+	if not lane or not lane.containerID or lane.containerID == addon.Constants.HIDDEN_CONTAINER_ID then
+		return
+	end
+
+	StaticPopupDialogs["BUCKLEUPSIDECAR_DELETE_BAR"] = StaticPopupDialogs["BUCKLEUPSIDECAR_DELETE_BAR"] or {
+		text = "Delete this sidecar bar? Assigned entries will move to Not Displayed.",
+		button1 = YES,
+		button2 = NO,
+		OnAccept = function(popup)
+			if popup and popup.barID then
+				addon.Profile:DeleteBar(popup.barID)
+				addon.Catalog:Rebuild()
+				addon.Bars:RefreshRuntime()
+				SettingsIntegration:RefreshPanel()
+			end
+		end,
+		timeout = 0,
+		whileDead = true,
+		hideOnEscape = true,
+		preferredIndex = 3,
+	}
+	local popup = StaticPopup_Show("BUCKLEUPSIDECAR_DELETE_BAR")
+	if popup then
+		popup.barID = lane.containerID
+	end
+end
+
+local function OpenLaneHeaderContextMenu(lane)
+	if not lane or not lane.containerID or lane.containerID == addon.Constants.HIDDEN_CONTAINER_ID then
+		return
+	end
+
+	if MenuUtil and MenuUtil.CreateContextMenu then
+		MenuUtil.CreateContextMenu(lane.Header, function(_owner, rootDescription)
+			rootDescription:CreateButton("Rename", function()
+				OpenLaneNameEditor(lane)
+			end)
+			rootDescription:CreateButton("Delete", function()
+				OpenLaneDeleteDialog(lane)
+			end)
+		end)
+	else
+		OpenLaneNameEditor(lane)
+	end
 end
 
 local function EnsureDragOverlay(self)
@@ -191,164 +312,6 @@ local function GetLaneDropIndex(lane, cursorX, cursorY)
 	return absoluteIndex, shownTiles
 end
 
-local function UpdateLaneActionVisibility(lane)
-	if not lane or not lane.showActions then
-		return
-	end
-
-	local isHovering = MouseIsOver(lane.Header) or MouseIsOver(lane.RenameButton) or MouseIsOver(lane.DeleteButton)
-	if isHovering then
-		lane.RenameButton:Show()
-		lane.DeleteButton:Show()
-	else
-		lane.RenameButton:Hide()
-		lane.DeleteButton:Hide()
-	end
-end
-
-local function EnsureAddEntryDialogHooks()
-	if not modifiedItemHookInstalled and type(hooksecurefunc) == "function" then
-		modifiedItemHookInstalled = true
-		hooksecurefunc("HandleModifiedItemClick", function(link)
-			if not IsModifiedClick("CHATLINK") or not link then
-				return
-			end
-
-			local popup = StaticPopup_FindVisible("BUCKLEUPSIDECAR_ADD_ENTRY")
-			if popup then
-				local editBox = popup.editBox or popup.EditBox
-				if editBox and editBox:HasFocus() then
-					editBox:SetText(link)
-					editBox:SetFocus()
-					editBox:HighlightText()
-				end
-			end
-		end)
-	end
-end
-
-local function ParseManualEntryInput(rawText)
-	local trimmedText = strtrim(rawText or "")
-	if trimmedText == "" then
-		return nil, "empty"
-	end
-
-	local explicitSpellID = tonumber(trimmedText:match("^[Ss][Pp][Ee][Ll][Ll]%s*[:#]%s*(%d+)$"))
-	if explicitSpellID then
-		return "spell", explicitSpellID
-	end
-
-	local explicitItemID = tonumber(trimmedText:match("^[Ii][Tt][Ee][Mm]%s*[:#]%s*(%d+)$"))
-	if explicitItemID then
-		return "item", explicitItemID
-	end
-
-	local linkedSpellID = tonumber(trimmedText:match("spell:(%d+)"))
-	if linkedSpellID then
-		return "spell", linkedSpellID
-	end
-
-	local linkedItemID = tonumber(trimmedText:match("item:(%d+)"))
-	if linkedItemID then
-		return "item", linkedItemID
-	end
-
-	local numericID = tonumber(trimmedText)
-	if not numericID then
-		return nil, "invalid"
-	end
-
-	local isValidSpell = addon.Util.IsValidSpellID(numericID)
-	local isExistingItem = addon.Util.DoesItemExistSafe and addon.Util.DoesItemExistSafe(numericID)
-	if isValidSpell and isExistingItem then
-		return nil, "ambiguous"
-	end
-	if isValidSpell then
-		return "spell", numericID
-	end
-
-	return "item", numericID
-end
-
-local function OpenAddEntryDialog()
-	EnsureAddEntryDialogHooks()
-
-	if not addEntryDialogInitialized then
-		addEntryDialogInitialized = true
-		StaticPopupDialogs["BUCKLEUPSIDECAR_ADD_ENTRY"] = {
-			text = "Add Entry\nEnter spell/item ID, shift-click a link, or use spell:123 / item:123",
-			button1 = ADD,
-			button2 = CANCEL,
-			hasEditBox = true,
-			whileDead = true,
-			hideOnEscape = true,
-			timeout = 0,
-			preferredIndex = 3,
-			OnShow = function(self)
-				local editBox = self.editBox or self.EditBox
-				if editBox then
-					if not editBox.BuckleUpSidecarLinkHooks then
-						editBox.BuckleUpSidecarLinkHooks = true
-						editBox:HookScript("OnEditFocusGained", function(focusedBox)
-							focusedBox.BuckleUpPreviousActiveChatEditBox = _G.ACTIVE_CHAT_EDIT_BOX
-							focusedBox.BuckleUpPreviousLastActiveChatEditBox = _G.LAST_ACTIVE_CHAT_EDIT_BOX
-							_G.ACTIVE_CHAT_EDIT_BOX = focusedBox
-							_G.LAST_ACTIVE_CHAT_EDIT_BOX = focusedBox
-						end)
-						editBox:HookScript("OnEditFocusLost", function(focusedBox)
-							if _G.ACTIVE_CHAT_EDIT_BOX == focusedBox then
-								_G.ACTIVE_CHAT_EDIT_BOX = focusedBox.BuckleUpPreviousActiveChatEditBox
-							end
-							if _G.LAST_ACTIVE_CHAT_EDIT_BOX == focusedBox then
-								_G.LAST_ACTIVE_CHAT_EDIT_BOX = focusedBox.BuckleUpPreviousLastActiveChatEditBox
-							end
-						end)
-					end
-					editBox:SetText("")
-					editBox:SetFocus()
-					editBox:HighlightText()
-				end
-			end,
-			OnHide = function(self)
-				local editBox = self.editBox or self.EditBox
-				if editBox then
-					if _G.ACTIVE_CHAT_EDIT_BOX == editBox then
-						_G.ACTIVE_CHAT_EDIT_BOX = editBox.BuckleUpPreviousActiveChatEditBox
-					end
-					if _G.LAST_ACTIVE_CHAT_EDIT_BOX == editBox then
-						_G.LAST_ACTIVE_CHAT_EDIT_BOX = editBox.BuckleUpPreviousLastActiveChatEditBox
-					end
-				end
-			end,
-			OnAccept = function(self)
-				local editBox = self.editBox or self.EditBox
-				local rawText = (editBox and editBox:GetText()) or ""
-				local kind, rawIDOrReason = ParseManualEntryInput(rawText)
-				if not kind then
-					if addon.Print then
-						if rawIDOrReason == "ambiguous" then
-							addon.Print("That ID could be either a spell or an item. Use spell:<id> or item:<id>.")
-						else
-							addon.Print("Enter a spell ID, item ID, spell link, or item link.")
-						end
-					end
-					return
-				end
-
-				AddCustomEntryByKind(kind, rawIDOrReason)
-			end,
-			EditBoxOnEnterPressed = function(self)
-				local parent = self:GetParent()
-				if parent and parent.button1 and parent.button1:IsEnabled() then
-					parent.button1:Click()
-				end
-			end,
-		}
-	end
-
-	StaticPopup_Show("BUCKLEUPSIDECAR_ADD_ENTRY")
-end
-
 local function OpenBlizzardEditMode()
 	if not EditModeManagerFrame and type(UIParentLoadAddOn) == "function" then
 		UIParentLoadAddOn("Blizzard_EditMode")
@@ -371,13 +334,49 @@ local function OpenBlizzardEditMode()
 	ShowUIPanel(EditModeManagerFrame)
 end
 
-function SettingsIntegration:GetContainerDefinitions()
-	local containers = {}
-	for _, bar in ipairs(addon.Profile:GetBars()) do
-		containers[#containers + 1] = { id = bar.id, label = bar.name }
+function SettingsIntegration:OpenAddEntryDialog()
+	if addon.AddEntryDialog then
+		addon.AddEntryDialog:Open()
 	end
-	containers[#containers + 1] = { id = addon.Constants.HIDDEN_CONTAINER_ID, label = "Not Displayed" }
-	return containers
+end
+
+function SettingsIntegration:OpenBlizzardEditMode()
+	OpenBlizzardEditMode()
+end
+
+function SettingsIntegration:GetOrganizerRows()
+	local rows = {}
+	local bars = addon.Profile:GetBars()
+	for _, bar in ipairs(bars) do
+		rows[#rows + 1] = {
+			rowType = "lane",
+			containerID = bar.id,
+			label = bar.name,
+		}
+	end
+	if #bars < (addon.Constants.MAX_BARS or math.huge) then
+		rows[#rows + 1] = {
+			rowType = "action",
+			actionID = "addBar",
+			label = "Add New Bar",
+		}
+	end
+	rows[#rows + 1] = {
+		rowType = "lane",
+		containerID = addon.Constants.HIDDEN_CONTAINER_ID,
+		label = "Not Displayed",
+	}
+	return rows
+end
+
+function SettingsIntegration:GetLaneAtIndex(index)
+	self.lanes = self.lanes or {}
+	local lane = self.lanes[index]
+	if not lane then
+		lane = self:CreateLane(self.panel.Content)
+		self.lanes[index] = lane
+	end
+	return lane
 end
 
 function SettingsIntegration:GetEntriesForContainer(containerID)
@@ -425,19 +424,15 @@ function SettingsIntegration:CreateTile(parent)
 	local button = CreateFrame("Button", nil, parent)
 	button:SetSize(TILE_SIZE, TILE_SIZE)
 	button:RegisterForDrag("LeftButton")
-	button:SetScript("OnReceiveDrag", function()
-		SettingsIntegration:TryHandleExternalDrop()
-	end)
 
-	button.Icon = button:CreateTexture(nil, "BACKGROUND")
+	button.Icon = button:CreateTexture(nil, "ARTWORK")
 	button.Icon:SetAllPoints()
-	button.Mask = button:CreateMaskTexture(nil, "ARTWORK")
-	button.Mask:SetAtlas("UI-HUD-CoolDownManager-Mask")
-	button.Mask:SetAllPoints()
-	button.Icon:AddMaskTexture(button.Mask)
 
-	button.Overlay = button:CreateTexture(nil, "OVERLAY")
-	button.Overlay:SetAtlas("UI-HUD-CoolDownManager-IconOverlay")
+	button.Highlight = button:CreateTexture(nil, "HIGHLIGHT")
+	button.Highlight:SetAllPoints()
+	button.Highlight:SetTexture("Interface\\Buttons\\ButtonHilight-Square")
+	button.Highlight:SetBlendMode("ADD")
+	button.Highlight:SetAlpha(0.4)
 
 	button.Shade = button:CreateTexture(nil, "OVERLAY")
 	button.Shade:SetAllPoints()
@@ -454,81 +449,66 @@ end
 function SettingsIntegration:CreateLane(parent)
 	local lane = CreateFrame("Frame", nil, parent)
 	lane:EnableMouse(true)
-	lane:SetScript("OnReceiveDrag", function()
-		SettingsIntegration:TryHandleExternalDrop()
-	end)
-	lane:SetScript("OnMouseUp", function(_, button)
-		if button == "LeftButton" then
-			SettingsIntegration:TryHandleExternalDrop()
-		end
-	end)
+	lane:SetWidth(LANE_WIDTH)
 	lane.tiles = {}
 
-	lane.Header = CreateFrame("Frame", nil, lane, "BackdropTemplate")
-	lane.Header:SetHeight(26)
-	lane.Header:SetPoint("TOPLEFT", lane, "TOPLEFT", 2, 0)
-	lane.Header:SetPoint("TOPRIGHT", lane, "TOPRIGHT", -2, 0)
-	lane.Header:SetBackdrop({
-		bgFile = "Interface\\Buttons\\WHITE8x8",
-		edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-		edgeSize = 10,
-		insets = { left = 2, right = 2, top = 2, bottom = 2 },
-	})
-	lane.Header:SetBackdropColor(0.10, 0.10, 0.10, 0.92)
-	lane.Header:SetBackdropBorderColor(0.30, 0.30, 0.30, 0.95)
-	lane.Header:SetScript("OnEnter", function()
-		UpdateLaneActionVisibility(lane)
-	end)
-	lane.Header:SetScript("OnLeave", function()
-		C_Timer.After(0, function()
-			UpdateLaneActionVisibility(lane)
+	lane.Header = CreateFrame("Button", nil, lane, "ListHeaderThreeSliceTemplate")
+	lane.Header:SetHeight(HEADER_HEIGHT)
+	lane.Header:SetPoint("TOPLEFT", lane, "TOPLEFT")
+	lane.Header:SetPoint("TOPRIGHT", lane, "TOPRIGHT")
+	lane.Header:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+	if lane.Header.SetTitleColor then
+		lane.Header:SetTitleColor(false, NORMAL_FONT_COLOR)
+		lane.Header:SetTitleColor(true, NORMAL_FONT_COLOR)
+	end
+	if lane.Header.SetClickHandler then
+		lane.Header:SetClickHandler(function(_, button)
+			if button == "LeftButton" then
+				ApplyLaneCollapsedState(lane, not lane.collapsed)
+				SettingsIntegration:RefreshPanel()
+			elseif button == "RightButton" then
+				OpenLaneHeaderContextMenu(lane)
+			end
 		end)
-	end)
+	else
+		lane.Header:SetScript("OnClick", function(_, button)
+			if button == "LeftButton" then
+				ApplyLaneCollapsedState(lane, not lane.collapsed)
+				SettingsIntegration:RefreshPanel()
+			elseif button == "RightButton" then
+				OpenLaneHeaderContextMenu(lane)
+			end
+		end)
+	end
 
-	lane.Title = lane.Header:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-	lane.Title:SetPoint("LEFT", lane.Header, "LEFT", 12, 0)
+	lane.Title = lane.Header.Text or lane.Header:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+	if not lane.Header.Text then
+		lane.Title:SetPoint("LEFT", lane.Header, "LEFT", 8, 0)
+	end
 	lane.Title:SetTextColor(1, 0.82, 0)
-	lane.Count = lane.Header:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	lane.Count:SetPoint("RIGHT", lane.Header, "RIGHT", -10, 0)
-	lane.Count:SetTextColor(0.72, 0.72, 0.72)
-
-	lane.RenameButton = CreateFrame("Button", nil, lane.Header)
-	lane.RenameButton:SetSize(44, 16)
-	lane.RenameButton.Text = lane.RenameButton:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	lane.RenameButton.Text:SetAllPoints()
-	lane.RenameButton.Text:SetJustifyH("CENTER")
-	lane.RenameButton.Text:SetText("Rename")
-	lane.RenameButton.Text:SetTextColor(0.72, 0.72, 0.72)
-	lane.RenameButton:Hide()
-	lane.RenameButton:SetScript("OnEnter", function()
-		UpdateLaneActionVisibility(lane)
-		lane.RenameButton.Text:SetTextColor(1, 0.82, 0)
+	lane.Container = CreateFrame("Frame", nil, lane)
+	lane.Container:SetPoint("TOPLEFT", lane.Header, "BOTTOMLEFT", LANE_CONTAINER_LEFT, -LANE_CONTAINER_TOP)
+	lane.Container:SetWidth(LANE_CONTAINER_WIDTH)
+	lane.Container:SetHeight(MIN_LANE_CONTENT_HEIGHT)
+	lane.Container:EnableMouse(true)
+	lane.Container:SetScript("OnReceiveDrag", function()
+		if lane.acceptsExternalDrop then
+			SettingsIntegration:TryHandleExternalDrop(lane)
+		end
 	end)
-	lane.RenameButton:SetScript("OnLeave", function()
-		C_Timer.After(0, function()
-			UpdateLaneActionVisibility(lane)
-		end)
-		lane.RenameButton.Text:SetTextColor(0.72, 0.72, 0.72)
+	lane.Container:SetScript("OnMouseUp", function(_, button)
+		if button == "LeftButton" and lane.acceptsExternalDrop then
+			SettingsIntegration:TryHandleExternalDrop(lane)
+		end
 	end)
 
-	lane.DeleteButton = CreateFrame("Button", nil, lane.Header)
-	lane.DeleteButton:SetSize(36, 16)
-	lane.DeleteButton.Text = lane.DeleteButton:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	lane.DeleteButton.Text:SetAllPoints()
-	lane.DeleteButton.Text:SetJustifyH("CENTER")
-	lane.DeleteButton.Text:SetText("Delete")
-	lane.DeleteButton.Text:SetTextColor(0.72, 0.72, 0.72)
-	lane.DeleteButton:Hide()
-	lane.DeleteButton:SetScript("OnEnter", function()
-		UpdateLaneActionVisibility(lane)
-		lane.DeleteButton.Text:SetTextColor(1, 0.82, 0)
-	end)
-	lane.DeleteButton:SetScript("OnLeave", function()
-		C_Timer.After(0, function()
-			UpdateLaneActionVisibility(lane)
-		end)
-		lane.DeleteButton.Text:SetTextColor(0.72, 0.72, 0.72)
-	end)
+	lane.Description = lane.Container:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+	lane.Description:SetPoint("TOPLEFT", lane.Container, "TOPLEFT", 0, 0)
+	lane.Description:SetPoint("TOPRIGHT", lane.Container, "TOPRIGHT", 0, 0)
+	lane.Description:SetJustifyH("LEFT")
+	lane.Description:SetTextColor(0.72, 0.72, 0.72)
+	lane.Description:SetText("Drag spells or items here to add them to your catalog")
+	lane.Description:Hide()
 
 	lane.NameEditor = CreateFrame("EditBox", nil, lane, "InputBoxTemplate")
 	lane.NameEditor:SetSize(150, 20)
@@ -538,7 +518,12 @@ function SettingsIntegration:CreateLane(parent)
 		self:ClearFocus()
 		self:Hide()
 		if self.lane then
-			self.lane.Title:Show()
+			if self.lane.Header and self.lane.Header.Name then
+				self.lane.Header.Name:Show()
+			end
+			if self.lane.Title then
+				self.lane.Title:Show()
+			end
 		end
 	end)
 	lane.NameEditor:SetScript("OnEnterPressed", function(self)
@@ -551,37 +536,103 @@ function SettingsIntegration:CreateLane(parent)
 		self:ClearFocus()
 		self:Hide()
 		if self.lane then
-			self.lane.Title:Show()
+			if self.lane.Header and self.lane.Header.Name then
+				self.lane.Header.Name:Show()
+			end
+			if self.lane.Title then
+				self.lane.Title:Show()
+			end
 		end
 	end)
 
-	lane.Indicator = lane:CreateTexture(nil, "OVERLAY")
+	lane.Indicator = lane.Container:CreateTexture(nil, "OVERLAY")
 	lane.Indicator:SetColorTexture(1, 0.82, 0, 0.95)
 	lane.Indicator:SetWidth(4)
 	lane.Indicator:Hide()
 	return lane
 end
 
+function SettingsIntegration:CreateAddBarRow(parent)
+	local row = CreateFrame("Button", nil, parent, "ListHeaderThreeSliceTemplate")
+	row:SetHeight(HEADER_HEIGHT)
+	row:SetWidth(LANE_WIDTH)
+	row:SetMotionScriptsWhileDisabled(true)
+	local accentR, accentG, accentB = 0.34, 0.78, 0.48
+	if row.SetTitleColor then
+		local accentColor = CreateColor(accentR, accentG, accentB)
+		row:SetTitleColor(false, accentColor)
+		row:SetTitleColor(true, accentColor)
+	end
+	if row.SetHeaderText then
+		row:SetHeaderText("Add New Bar")
+	end
+	if row.Name then
+		row.Name:SetAlpha(1)
+		row.Name:SetTextColor(accentR, accentG, accentB)
+	end
+	if row.Left then
+		row.Left:SetAlpha(0.65)
+		row.Left:SetVertexColor(accentR, accentG, accentB, 1)
+	end
+	if row.Middle then
+		row.Middle:SetAlpha(0.65)
+		row.Middle:SetVertexColor(accentR, accentG, accentB, 1)
+	end
+	if row.Right then
+		row.Right:SetAtlas("Options_ListExpand_Right", true)
+		row.Right:SetAlpha(0.65)
+		row.Right:SetVertexColor(accentR, accentG, accentB, 1)
+	end
+	if row.HighlightLeft then
+		row.HighlightLeft:SetAlpha(0.35)
+		row.HighlightLeft:SetVertexColor(accentR, accentG, accentB, 1)
+	end
+	if row.HighlightMiddle then
+		row.HighlightMiddle:SetAlpha(0.35)
+		row.HighlightMiddle:SetVertexColor(accentR, accentG, accentB, 1)
+	end
+	if row.HighlightRight then
+		row.HighlightRight:SetAtlas("Options_ListExpand_Right", true)
+		row.HighlightRight:SetAlpha(0.35)
+		row.HighlightRight:SetVertexColor(accentR, accentG, accentB, 1)
+	end
+	row:SetScript("OnClick", function()
+		local bar, reason = addon.Profile:AddBar()
+		if bar then
+			addon.Bars:RefreshRuntime()
+			SettingsIntegration:RefreshPanel()
+		else
+			addon.Print("Add bar failed: " .. tostring(reason))
+		end
+	end)
+	return row
+end
+
 function SettingsIntegration:LayoutLane(lane, entries)
-	local contentWidth = math.max(240, (lane:GetWidth() > 0 and lane:GetWidth() or 320) - 12)
+	if lane.Header and lane.Header.UpdateCollapsedState then
+		lane.Header:UpdateCollapsedState(lane.collapsed == true)
+	end
+	local descriptionHeight = lane.Description and lane.Description:IsShown() and 18 or 0
+	local contentWidth = math.max(240, lane.Container:GetWidth() > 0 and lane.Container:GetWidth() or LANE_CONTAINER_WIDTH)
 	local columns = math.max(1, math.floor((contentWidth + TILE_GAP) / (TILE_SIZE + TILE_GAP)))
-	local tilesTopOffset = lane.layoutExpanded and 110 or 32
 
 	for index, entry in ipairs(entries) do
 		local tile = lane.tiles[index]
 		if not tile then
-			tile = self:CreateTile(lane)
+			tile = self:CreateTile(lane.Container)
+			tile.lane = lane
+			tile:SetScript("OnReceiveDrag", function(selfTile)
+				if selfTile.lane and selfTile.lane.acceptsExternalDrop then
+					SettingsIntegration:TryHandleExternalDrop(selfTile.lane)
+				end
+			end)
 			lane.tiles[index] = tile
 		end
 
 		local column = (index - 1) % columns
 		local row = math.floor((index - 1) / columns)
 		tile:ClearAllPoints()
-		tile:SetPoint("TOPLEFT", 12 + (column * (TILE_SIZE + TILE_GAP)), -tilesTopOffset - (row * (TILE_SIZE + TILE_GAP)))
-		local overlayInset = math.max(5, math.floor(TILE_SIZE * 0.18))
-		tile.Overlay:ClearAllPoints()
-		tile.Overlay:SetPoint("TOPLEFT", -overlayInset, overlayInset)
-		tile.Overlay:SetPoint("BOTTOMRIGHT", overlayInset, -overlayInset)
+		tile:SetPoint("TOPLEFT", lane.Container, "TOPLEFT", column * (TILE_SIZE + TILE_GAP), -descriptionHeight - (row * (TILE_SIZE + TILE_GAP)))
 
 		tile.entry = entry
 		local matchesSearch = EntryMatchesSearch(self.panel, entry)
@@ -613,7 +664,9 @@ function SettingsIntegration:LayoutLane(lane, entries)
 	end
 
 	local rows = math.max(1, math.floor((#entries - 1) / columns) + 1)
-	lane:SetHeight(math.max(MIN_LANE_HEIGHT, 30 + (rows * TILE_SIZE) + ((rows - 1) * TILE_GAP) + 6))
+	local contentHeight = math.max(MIN_LANE_CONTENT_HEIGHT, descriptionHeight + (rows * TILE_SIZE) + ((rows - 1) * TILE_GAP))
+	lane.Container:SetHeight(contentHeight)
+	ApplyLaneCollapsedState(lane, lane.collapsed)
 end
 
 function SettingsIntegration:RefreshLanes()
@@ -623,93 +676,64 @@ function SettingsIntegration:RefreshLanes()
 
 	self:RebuildOrganizerEntryCache()
 
-	local contentWidth = math.max(300, (self.panel.Scroll:GetWidth() > 0 and self.panel.Scroll:GetWidth() or 320) - 18)
-	self.panel.Content:SetWidth(contentWidth)
+	self.panel.Content:SetWidth(LANE_WIDTH)
 
-	local containers = self:GetContainerDefinitions()
-	self.lanes = self.lanes or {}
+	local rows = self:GetOrganizerRows()
+	self.addBarRow = self.addBarRow or self:CreateAddBarRow(self.panel.Content)
 	local previousLane
-	for index, container in ipairs(containers) do
-		local lane = self.lanes[index]
-		if not lane then
-			lane = self:CreateLane(self.panel.Content)
-			self.lanes[index] = lane
-		end
-		lane.containerID = container.id
-		lane:ClearAllPoints()
-		if previousLane then
-			lane:SetPoint("TOPLEFT", previousLane, "BOTTOMLEFT", 0, -LANE_PADDING)
-			lane:SetPoint("TOPRIGHT", previousLane, "BOTTOMRIGHT", 0, -LANE_PADDING)
-		else
-			lane:SetPoint("TOPLEFT", self.panel.Content, "TOPLEFT", 8, 0)
-			lane:SetPoint("TOPRIGHT", self.panel.Content, "TOPRIGHT", 8, -2)
-		end
-		lane:SetWidth(contentWidth - 16)
-		lane.Header:SetPoint("TOPLEFT", lane, "TOPLEFT", 0, 0)
-		lane.Header:SetPoint("TOPRIGHT", lane, "TOPRIGHT", 0, 0)
+	local activeLaneCount = 0
+	for _, row in ipairs(rows) do
+		if row.rowType == "action" and row.actionID == "addBar" then
+			local row = self.addBarRow
+			row:ClearAllPoints()
+			if previousLane then
+				row:SetPoint("TOPLEFT", previousLane, "BOTTOMLEFT", 0, -LANE_PADDING)
+				row:SetPoint("TOPRIGHT", previousLane, "BOTTOMRIGHT", 0, -LANE_PADDING)
+			else
+				row:SetPoint("TOPLEFT", self.panel.Content, "TOPLEFT", 0, 0)
+				row:SetPoint("TOPRIGHT", self.panel.Content, "TOPRIGHT", 0, 0)
+			end
+			row:Show()
+			previousLane = row
+		elseif row.rowType == "lane" then
+			activeLaneCount = activeLaneCount + 1
+			local lane = self:GetLaneAtIndex(activeLaneCount)
+			lane.containerID = row.containerID
+			lane:ClearAllPoints()
+			if previousLane then
+				lane:SetPoint("TOPLEFT", previousLane, "BOTTOMLEFT", 0, -LANE_PADDING)
+				lane:SetPoint("TOPRIGHT", previousLane, "BOTTOMRIGHT", 0, -LANE_PADDING)
+			else
+				lane:SetPoint("TOPLEFT", self.panel.Content, "TOPLEFT", 0, 0)
+			end
 
-		local entries = self:GetEntriesForContainer(container.id)
-		lane.Title:SetText(container.label)
-		lane.Count:SetText(string.format("%d entries", #entries))
-		lane.NameEditor.lane = lane
-		lane.NameEditor:ClearAllPoints()
-		lane.NameEditor:SetPoint("TOPLEFT", lane.Header, "TOPLEFT", 8, -2)
-		lane.RenameButton:ClearAllPoints()
-		lane.DeleteButton:ClearAllPoints()
-		lane.DeleteButton:SetPoint("RIGHT", lane.Header, "RIGHT", -12, 0)
-		lane.RenameButton:SetPoint("RIGHT", lane.DeleteButton, "LEFT", -8, 0)
-		lane.Count:ClearAllPoints()
-		lane.showActions = container.id ~= addon.Constants.HIDDEN_CONTAINER_ID
-		if container.id == addon.Constants.HIDDEN_CONTAINER_ID then
-			lane.RenameButton:Hide()
-			lane.DeleteButton:Hide()
+			local entries = self:GetEntriesForContainer(row.containerID)
+			lane.currentLabel = row.label
+			if lane.Header.SetHeaderText then
+				lane.Header:SetHeaderText(row.label)
+			else
+				lane.Title:SetText(row.label)
+			end
+			lane.NameEditor.lane = lane
+			lane.NameEditor:ClearAllPoints()
+			lane.NameEditor:SetPoint("LEFT", lane.Header, "LEFT", 6, 0)
+			lane.acceptsExternalDrop = row.containerID == addon.Constants.HIDDEN_CONTAINER_ID
 			lane.NameEditor:Hide()
 			lane.Title:Show()
-			lane.Count:SetPoint("RIGHT", lane.Header, "RIGHT", -10, 0)
-			lane.Count:SetText(string.format("%d entries", #entries))
-		else
-			lane.RenameButton:Hide()
-			lane.DeleteButton:Hide()
-			lane.Count:SetPoint("RIGHT", lane.Header, "RIGHT", -10, 0)
-			lane.Count:SetText("")
-			lane.RenameButton:SetScript("OnClick", function()
-				lane.Title:Hide()
-				lane.NameEditor:SetText(container.label)
-				lane.NameEditor:Show()
-				lane.NameEditor:SetFocus()
-				lane.NameEditor:HighlightText()
-			end)
-			lane.DeleteButton:SetScript("OnClick", function()
-				StaticPopupDialogs["BUCKLEUPSIDECAR_DELETE_BAR"] = StaticPopupDialogs["BUCKLEUPSIDECAR_DELETE_BAR"] or {
-					text = "Delete this sidecar bar? Assigned entries will move to Not Displayed.",
-					button1 = YES,
-					button2 = NO,
-					OnAccept = function(popup)
-						if popup and popup.barID then
-							addon.Profile:DeleteBar(popup.barID)
-							addon.Catalog:Rebuild()
-							addon.Bars:RefreshRuntime()
-							SettingsIntegration:RefreshPanel()
-						end
-					end,
-					timeout = 0,
-					whileDead = true,
-					hideOnEscape = true,
-					preferredIndex = 3,
-				}
-				local popup = StaticPopup_Show("BUCKLEUPSIDECAR_DELETE_BAR")
-				if popup then
-					popup.barID = container.id
-				end
-			end)
+			lane.Description:SetShown(row.containerID == addon.Constants.HIDDEN_CONTAINER_ID)
+			self:LayoutLane(lane, entries)
+			lane:Show()
+			previousLane = lane
 		end
-		self:LayoutLane(lane, entries)
-		lane:Show()
-		previousLane = lane
 	end
 
-	for index = #containers + 1, #self.lanes do
-		self.lanes[index]:Hide()
+	for index, lane in ipairs(self.lanes or {}) do
+		if index > activeLaneCount then
+			lane:Hide()
+		end
+	end
+	if self.addBarRow and not previousLane then
+		self.addBarRow:Hide()
 	end
 
 	local totalHeight = 1
@@ -740,7 +764,8 @@ end
 function SettingsIntegration:ClearExternalDropTarget()
 	local hiddenLane = self:GetHiddenLane()
 	if hiddenLane and hiddenLane:IsShown() then
-		hiddenLane.Header:SetBackdropBorderColor(0.30, 0.30, 0.30, 0.95)
+		hiddenLane.Header:SetAlpha(1)
+		hiddenLane.Container:SetAlpha(1)
 	end
 	self.externalDropTargetActive = nil
 end
@@ -827,15 +852,16 @@ function SettingsIntegration:UpdateExternalDropTarget()
 		return
 	end
 
-	if isOverOrganizer then
-		hiddenLane.Header:SetBackdropBorderColor(0.12, 0.85, 0.35, 0.95)
+	if isOverOrganizer and IsCursorOverExternalDropSurface(hiddenLane) then
+		hiddenLane.Header:SetAlpha(1)
+		hiddenLane.Container:SetAlpha(1)
 		self.externalDropTargetActive = true
 	else
 		self:ClearExternalDropTarget()
 	end
 end
 
-function SettingsIntegration:TryHandleExternalDrop()
+function SettingsIntegration:TryHandleExternalDrop(targetLane)
 	if self.dragState and self.dragState.entryID then
 		return false
 	end
@@ -845,16 +871,11 @@ function SettingsIntegration:TryHandleExternalDrop()
 		return false
 	end
 
-	local isOverOrganizer = IsCursorOverFrame(self.panel) or IsCursorOverFrame(self.panel.Scroll) or IsCursorOverFrame(self.panel.Content)
-	if not isOverOrganizer then
-		for _, lane in ipairs(self.lanes or {}) do
-			if lane:IsShown() and IsCursorOverFrame(lane) then
-				isOverOrganizer = true
-				break
-			end
-		end
+	local hiddenLane = targetLane
+	if not hiddenLane or hiddenLane.containerID ~= addon.Constants.HIDDEN_CONTAINER_ID then
+		hiddenLane = self:GetHiddenLane()
 	end
-	if not isOverOrganizer then
+	if not hiddenLane or not hiddenLane:IsShown() or not IsCursorOverExternalDropSurface(hiddenLane) then
 		return false
 	end
 
@@ -881,9 +902,9 @@ function SettingsIntegration:UpdateDropTarget()
 
 	for _, lane in ipairs(self.lanes or {}) do
 		HideIndicator(lane)
-		lane.Header:SetBackdropBorderColor(0.30, 0.30, 0.30, 0.95)
+		SetLaneHeaderHover(lane, false)
 		if lane:IsShown() and IsCursorOverFrame(lane) then
-			lane.Header:SetBackdropBorderColor(0.95, 0.82, 0.10, 0.95)
+			SetLaneHeaderHover(lane, true)
 			drag.targetContainerID = lane.containerID
 
 			local targetIndex, shownTiles = GetLaneDropIndex(lane, cursorX, cursorY)
@@ -962,7 +983,7 @@ function SettingsIntegration:FinishDrag()
 
 	for _, lane in ipairs(self.lanes or {}) do
 		HideIndicator(lane)
-		lane.Header:SetBackdropBorderColor(0.30, 0.30, 0.30, 0.95)
+		SetLaneHeaderHover(lane, false)
 	end
 
 	if drag.targetContainerID then
@@ -984,9 +1005,12 @@ function SettingsIntegration:FinishDrag()
 end
 
 function SettingsIntegration:BuildOrganizerPanel(panel)
-	panel.SearchBox = CreateFrame("EditBox", nil, panel, "SearchBoxTemplate")
-	panel.SearchBox:SetPoint("BOTTOMLEFT", panel, "TOPLEFT", 64, 8)
-	panel.SearchBox:SetSize(290, 22)
+	local settings = self:GetSettingsFrame()
+
+	panel.SearchBox = CreateFrame("EditBox", nil, settings, "SearchBoxTemplate")
+	panel.SearchBox:SetPoint("TOPLEFT", settings, "TOPLEFT", SEARCH_LEFT_INSET, -SEARCH_TOP_INSET)
+	panel.SearchBox:SetSize(SEARCH_WIDTH, SEARCH_HEIGHT)
+	panel.SearchBox:Hide()
 	if panel.SearchBox.Instructions then
 		panel.SearchBox.Instructions:SetText("Enter search text")
 	end
@@ -996,16 +1020,21 @@ function SettingsIntegration:BuildOrganizerPanel(panel)
 		SettingsIntegration:RefreshPanel()
 	end)
 
-	panel.OptionsButton = CreateFrame("DropdownButton", nil, panel, "UIPanelIconDropdownButtonTemplate")
+	panel.OptionsButton = CreateFrame("DropdownButton", nil, settings, "UIPanelIconDropdownButtonTemplate")
 	panel.OptionsButton:SetSize(20, 20)
 	panel.OptionsButton:SetPoint("LEFT", panel.SearchBox, "RIGHT", 3, 0)
+	panel.OptionsButton:Hide()
 	if panel.OptionsButton.SetupMenu then
 		panel.OptionsButton:SetupMenu(function(_owner, rootDescription)
-			rootDescription:CreateButton(addon.Profile:ShowTooltips() and "Hide Runtime Tooltips" or "Show Runtime Tooltips", function()
+			rootDescription:CreateCheckbox("Show Tooltip", function()
+				return addon.Profile:ShowTooltips()
+			end, function()
 				addon.Profile:SetShowTooltips(not addon.Profile:ShowTooltips())
 				SettingsIntegration:RefreshPanel()
 			end)
-			rootDescription:CreateButton(addon.Catalog:IsFullCatalogViewEnabled() and "Show Relevant Catalog Only" or "Show Full Catalog", function()
+			rootDescription:CreateCheckbox("Show Full Catalog", function()
+				return addon.Catalog:IsFullCatalogViewEnabled()
+			end, function()
 				addon.Catalog:SetFullCatalogViewEnabled(not addon.Catalog:IsFullCatalogViewEnabled())
 				SettingsIntegration:RefreshPanel()
 			end)
@@ -1018,25 +1047,16 @@ function SettingsIntegration:BuildOrganizerPanel(panel)
 				SettingsIntegration:RefreshPanel()
 			end)
 			rootDescription:CreateButton("Edit Mode", function()
-				OpenBlizzardEditMode()
+				SettingsIntegration:OpenBlizzardEditMode()
 			end)
 			rootDescription:CreateDivider()
-			rootDescription:CreateButton("Add Entry", function()
-				OpenAddEntryDialog()
-			end)
-			rootDescription:CreateButton("Add Bar", function()
-				local bar, reason = addon.Profile:AddBar()
-				if bar then
-					addon.Bars:RefreshRuntime()
-					SettingsIntegration:RefreshPanel()
-				else
-					addon.Print("Add bar failed: " .. tostring(reason))
-				end
+			rootDescription:CreateButton("Add by ID", function()
+				SettingsIntegration:OpenAddEntryDialog()
 			end)
 		end)
 	else
 		panel.OptionsButton:SetScript("OnClick", function()
-			OpenAddEntryDialog()
+			SettingsIntegration:OpenAddEntryDialog()
 		end)
 	end
 	panel.OptionsButton:SetScript("OnEnter", function(self)
@@ -1047,23 +1067,20 @@ function SettingsIntegration:BuildOrganizerPanel(panel)
 		GameTooltip:Hide()
 	end)
 
-	panel.Scroll = CreateFrame("ScrollFrame", nil, panel, "ScrollFrameTemplate")
-	panel.Scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, -10)
-	panel.Scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -20, 28)
+	panel.Scroll = CreateFrame("ScrollFrame", nil, settings, "ScrollFrameTemplate")
+	panel.Scroll:SetPoint("TOPLEFT", settings, "TOPLEFT", SCROLL_LEFT_INSET, -SCROLL_TOP_INSET)
+	panel.Scroll:SetPoint("BOTTOMRIGHT", settings, "BOTTOMRIGHT", -SCROLL_RIGHT_INSET, SCROLL_BOTTOM_INSET)
+	panel.Scroll:Hide()
 
 	panel.Content = CreateFrame("Frame", nil, panel.Scroll)
 	panel.Content:SetSize(1, 1)
 	panel.Scroll:SetScrollChild(panel.Content)
 	panel.Content:EnableMouse(true)
+	-- External spell/item drags do not expose a clean event-driven hover lifecycle for
+	-- this organizer surface. We intentionally use a narrow local poll here after
+	-- testing hover-only and gated variants: they behaved the same in practice, and
+	-- the always-local poll stayed smaller and easier to reason about.
 	panel.Content:SetScript("OnUpdate", function()
 		SettingsIntegration:UpdateExternalDropTarget()
-	end)
-	panel.Content:SetScript("OnReceiveDrag", function()
-		SettingsIntegration:TryHandleExternalDrop()
-	end)
-	panel.Content:SetScript("OnMouseUp", function(_, button)
-		if button == "LeftButton" then
-			SettingsIntegration:TryHandleExternalDrop()
-		end
 	end)
 end

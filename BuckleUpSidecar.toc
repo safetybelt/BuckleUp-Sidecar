@@ -19,6 +19,7 @@ BlizzardInterop\EditMode.lua
 Runtime\SpellDisplayState.lua
 Runtime\Readiness.lua
 Runtime\Bars.lua
+UI\AddEntryDialog.lua
 UI\EditModePanel.lua
 UI\SettingsIntegration.lua
 UI\SidecarOrganizer.lua
