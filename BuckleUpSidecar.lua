@@ -123,7 +123,10 @@ end
 local function DumpProfile()
 	Print(string.format("Spec %s: %d bars, %d configured entries", addon.profileKey or "?", #addon.Profile:GetBars(), #addon.Profile:GetConfiguredEntries()))
 	for _, bar in ipairs(addon.Profile:GetBars()) do
-		Print(string.format("Bar %s '%s' at (%d,%d), size %d, spacing %d", bar.id, bar.name, bar.x, bar.y, bar.iconSize, bar.spacing))
+		local presentation = addon.BarPresentation and addon.BarPresentation:Resolve(bar) or nil
+		local iconSize = presentation and presentation.iconSize or 0
+		local spacing = presentation and presentation.interIconSpacing or 0
+		Print(string.format("Bar %s '%s' at (%d,%d), size %.1f, spacing %.1f", bar.id, bar.name, bar.x, bar.y, iconSize, spacing))
 	end
 	for _, entry in ipairs(addon.Profile:GetConfiguredEntries()) do
 		Print(string.format("Entry %s -> %s #%d", entry.id, entry.containerID, entry.order))
@@ -251,12 +254,19 @@ local function HandleSlash(message)
 			Print("Usage: /bus remove <entryID|rawID>")
 			return
 		end
+		local catalogEntry = addon.Catalog:GetEntry(entryID)
 		local entry = addon.Profile:GetEntryByID(entryID)
-		if not entry then
+		if not entry and not catalogEntry then
 			Print("Missing entry: " .. tostring(rest))
 			return
 		end
-		local ok, reason = addon.Profile:RemoveEntry(entryID)
+
+		local ok, reason
+		if catalogEntry and catalogEntry.isCustom then
+			ok, reason = addon.Catalog:DeleteCustomEntry(entryID)
+		else
+			ok, reason = addon.Profile:RemoveEntry(entryID)
+		end
 		if not ok then
 			if reason == "protected_entry" then
 				Print("That entry is part of the built-in sidecar setup and can't be removed.")

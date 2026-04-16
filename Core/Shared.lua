@@ -155,6 +155,13 @@ function util.GetCurrentClassName()
 	return className or "Unknown"
 end
 
+function util.GetCurrentCharacterKey()
+	local name = UnitName("player") or "Unknown"
+	local realm = GetRealmName() or "UnknownRealm"
+	local classFile = select(2, UnitClass("player")) or "UNKNOWN"
+	return string.format("%s-%s-%s", name, realm, classFile)
+end
+
 function util.GetCurrentSpecDisplayLabel()
 	return string.format("%s - %s", util.GetCurrentClassName(), util.GetCurrentSpecName())
 end
@@ -281,6 +288,39 @@ function util.IsKnownPlayerSpell(spellID)
 	end
 
 	return false
+end
+
+function util.IsSpellRelevantToCurrentSpec(spellID)
+	if not spellID then
+		return false
+	end
+
+	local candidateSpellIDs = { spellID }
+	local resolvedSpellID = util.ResolveSpellVariantID(spellID)
+	if resolvedSpellID and resolvedSpellID ~= spellID then
+		candidateSpellIDs[#candidateSpellIDs + 1] = resolvedSpellID
+	end
+
+	if type(C_SpellBook) == "table" and type(C_SpellBook.FindSpellBookSlotForSpell) == "function" then
+		local includeHidden = true
+		local includeFlyouts = true
+		local includeFutureSpells = true
+		local includeOffSpec = false
+		for _, candidateSpellID in ipairs(candidateSpellIDs) do
+			local slotIndex = C_SpellBook.FindSpellBookSlotForSpell(
+				candidateSpellID,
+				includeHidden,
+				includeFlyouts,
+				includeFutureSpells,
+				includeOffSpec
+			)
+			if slotIndex then
+				return true
+			end
+		end
+	end
+
+	return util.IsKnownPlayerSpell(spellID)
 end
 
 function util.IsSpellUsableSafe(spellID)

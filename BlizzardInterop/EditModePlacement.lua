@@ -102,7 +102,7 @@ local function GetPinnedVisualX(barFrame, bar)
 
 	local growthDirection = bar.growthDirection or constants.GROWTH_RIGHT
 	local presentation = barPresentation and barPresentation:Resolve(bar) or nil
-	local iconSize = presentation and presentation.iconSize or util.NumberOrNil(bar.iconSize) or constants.ESSENTIAL_BASE_ICON_SIZE
+	local iconSize = presentation and presentation.iconSize or constants.ESSENTIAL_BASE_ICON_SIZE
 	local barPadding = presentation and presentation.outerPadding or 0
 
 	if growthDirection == constants.GROWTH_LEFT then

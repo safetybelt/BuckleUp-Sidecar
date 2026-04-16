@@ -24,11 +24,10 @@ function EntryIntake:AddSpell(spellID, options)
 		return false
 	end
 
-	addon.Profile:EnsureEntry({
+	addon.Catalog:StoreCustomEntry({
 		id = addon.Util.MakeEntryID("spell", spellID),
 		kind = "spell",
 		spellID = spellID,
-		containerID = addon.Constants.HIDDEN_CONTAINER_ID,
 	})
 	self:RefreshAfterEntryChange()
 	if options.onComplete then
@@ -40,11 +39,10 @@ end
 function EntryIntake:AddItem(itemID, options)
 	options = options or {}
 	return addon.Util.ValidateItemIDAsync(itemID, function(validItemID)
-		addon.Profile:EnsureEntry({
+		addon.Catalog:StoreCustomEntry({
 			id = addon.Util.MakeEntryID("item", validItemID),
 			kind = "item",
 			itemID = validItemID,
-			containerID = addon.Constants.HIDDEN_CONTAINER_ID,
 		})
 		self:RefreshAfterEntryChange()
 		if options.onComplete then

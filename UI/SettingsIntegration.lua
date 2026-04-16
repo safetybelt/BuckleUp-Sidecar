@@ -69,10 +69,11 @@ end
 
 function SettingsIntegration:GetSidecarLayoutDropdownSignature()
 	local currentSpecKey = addon.profileKey or addon.Util.GetCurrentSpecKey()
+	local currentCharacterKey = addon.Profile:GetCurrentCharacterKey()
 	local snapshots = addon.Profile:GetLayoutSnapshots()
-	local parts = { tostring(currentSpecKey) }
+	local parts = { tostring(currentCharacterKey), tostring(currentSpecKey) }
 	for _, snapshot in ipairs(snapshots) do
-		parts[#parts + 1] = string.format("%s|%s|%s|%d", tostring(snapshot.key), tostring(snapshot.label), tostring(snapshot.specKey), #(snapshot.bars or {}))
+		parts[#parts + 1] = string.format("%s|%s|%s|%s|%d", tostring(snapshot.key), tostring(snapshot.label), tostring(snapshot.characterKey), tostring(snapshot.specKey), #(snapshot.bars or {}))
 	end
 	return table.concat(parts, "||")
 end
@@ -99,9 +100,13 @@ function SettingsIntegration:SetupSidecarLayoutDropdown()
 		dropdown:SetupMenu(function(_owner, rootDescription)
 			local snapshots = addon.Profile:GetLayoutSnapshots()
 			local currentSpecKey = addon.profileKey or addon.Util.GetCurrentSpecKey()
+			local currentCharacterKey = addon.Profile:GetCurrentCharacterKey()
 			local filteredSnapshots = {}
 			for _, snapshot in ipairs(snapshots) do
-				if tostring(snapshot.specKey) ~= tostring(currentSpecKey) then
+				if not (
+					tostring(snapshot.specKey) == tostring(currentSpecKey)
+					and tostring(snapshot.characterKey) == tostring(currentCharacterKey)
+				) then
 					filteredSnapshots[#filteredSnapshots + 1] = snapshot
 				end
 			end

@@ -397,9 +397,11 @@ function SettingsIntegration:RebuildOrganizerEntryCache()
 	local entriesByContainer = {}
 	for _, entry in ipairs(addon.Catalog:GetOrderedEntries()) do
 		local configured = configuredByID[entry.id]
-		local containerID = (configured and configured.containerID) or addon.Constants.HIDDEN_CONTAINER_ID
-		entriesByContainer[containerID] = entriesByContainer[containerID] or {}
-		entriesByContainer[containerID][#entriesByContainer[containerID] + 1] = entry
+		if addon.Catalog:ShouldShowInOrganizer(entry, configured) then
+			local containerID = (configured and configured.containerID) or addon.Constants.HIDDEN_CONTAINER_ID
+			entriesByContainer[containerID] = entriesByContainer[containerID] or {}
+			entriesByContainer[containerID][#entriesByContainer[containerID] + 1] = entry
+		end
 	end
 
 	for containerID, entries in pairs(entriesByContainer) do
@@ -1001,6 +1003,10 @@ function SettingsIntegration:BuildOrganizerPanel(panel)
 		panel.OptionsButton:SetupMenu(function(_owner, rootDescription)
 			rootDescription:CreateButton(addon.Profile:ShowTooltips() and "Hide Runtime Tooltips" or "Show Runtime Tooltips", function()
 				addon.Profile:SetShowTooltips(not addon.Profile:ShowTooltips())
+				SettingsIntegration:RefreshPanel()
+			end)
+			rootDescription:CreateButton(addon.Catalog:IsFullCatalogViewEnabled() and "Show Relevant Catalog Only" or "Show Full Catalog", function()
+				addon.Catalog:SetFullCatalogViewEnabled(not addon.Catalog:IsFullCatalogViewEnabled())
 				SettingsIntegration:RefreshPanel()
 			end)
 			rootDescription:CreateButton(addon.Profile:IsUnifiedVisualStyleEnabled() and "Disable Unified Visual Style" or "Enable Unified Visual Style", function()

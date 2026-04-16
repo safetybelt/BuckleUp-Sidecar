@@ -20,13 +20,6 @@ local function ClampValue(value, minValue, maxValue)
 	return value
 end
 
-local function RoundToNearestStep(value, step)
-	if not value or not step or step <= 0 then
-		return value
-	end
-	return math.floor((value / step) + 0.5) * step
-end
-
 local function SortEntries(entries)
 	util.sort(entries, function(left, right)
 		if left.order == right.order then
@@ -45,27 +38,11 @@ local function NormalizeBar(bar, index)
 	normalized.relativeTo = type(normalized.relativeTo) == "string" and normalized.relativeTo or "UIParent"
 	normalized.x = util.NumberOrNil(normalized.x) or 0
 	normalized.y = util.NumberOrNil(normalized.y) or 0
-	local legacyIconSize = util.NumberOrNil(normalized.iconSize)
-	local legacySpacing = util.NumberOrNil(normalized.spacing)
-	local legacyEnabled = normalized.enabled
-	local sizePercent = util.NumberOrNil(normalized.sizePercent)
-	if sizePercent == nil and legacyIconSize then
-		sizePercent = RoundToNearestStep((legacyIconSize / constants.ESSENTIAL_BASE_ICON_SIZE) * 100, 10)
-	end
-	local padding = util.NumberOrNil(normalized.padding)
-	if padding == nil and legacySpacing ~= nil then
-		padding = legacySpacing
-	end
-	local opacity = util.NumberOrNil(normalized.opacity)
-	local visibility = normalized.visibility
-	if visibility == nil and legacyEnabled == false then
-		visibility = constants.BAR_VISIBILITY_HIDDEN
-	end
 	local normalizedPresentation = barPresentation:NormalizeStoredFields({
-		sizePercent = sizePercent,
-		padding = padding,
-		opacity = opacity,
-		visibility = visibility,
+		sizePercent = util.NumberOrNil(normalized.sizePercent),
+		padding = util.NumberOrNil(normalized.padding),
+		opacity = util.NumberOrNil(normalized.opacity),
+		visibility = normalized.visibility,
 		matchMode = normalized.matchMode,
 	})
 	normalized.sizePercent = normalizedPresentation.sizePercent
@@ -73,10 +50,7 @@ local function NormalizeBar(bar, index)
 	normalized.opacity = normalizedPresentation.opacity
 	normalized.visibility = normalizedPresentation.visibility
 	normalized.matchMode = normalizedPresentation.matchMode
-	normalized.iconSize = math.floor((constants.ESSENTIAL_BASE_ICON_SIZE * normalized.sizePercent / 100) + 0.5)
-	normalized.spacing = normalized.padding
 	normalized.growthDirection = normalized.growthDirection or constants.GROWTH_RIGHT
-	normalized.enabled = normalized.visibility ~= constants.BAR_VISIBILITY_HIDDEN
 	return normalized
 end
 
@@ -107,21 +81,27 @@ end
 
 function Profile:GetProfilesTable()
 	BuckleUpSidecarDB = BuckleUpSidecarDB or {}
-	BuckleUpSidecarDB.profiles = BuckleUpSidecarDB.profiles or {}
-	return BuckleUpSidecarDB.profiles
+	self:InitializeDatabase()
+	local characterKey = self:GetCurrentCharacterKey()
+	BuckleUpSidecarDB.assignments[characterKey] = BuckleUpSidecarDB.assignments[characterKey] or {}
+	return BuckleUpSidecarDB.assignments[characterKey]
 end
 
 function Profile:GetAccountLayoutsTable()
 	BuckleUpSidecarDB = BuckleUpSidecarDB or {}
-	BuckleUpSidecarDB.layouts = BuckleUpSidecarDB.layouts or {}
-	return BuckleUpSidecarDB.layouts
+	self:InitializeDatabase()
+	BuckleUpSidecarDB.layoutSnapshots = BuckleUpSidecarDB.layoutSnapshots or {}
+	return BuckleUpSidecarDB.layoutSnapshots
 end
 
 function Profile:GetCurrentCharacterKey()
-	local name = UnitName("player") or "Unknown"
-	local realm = GetRealmName() or "UnknownRealm"
-	local className = select(2, UnitClass("player")) or "UNKNOWN"
-	return string.format("%s-%s-%s", name, realm, className)
+	return util.GetCurrentCharacterKey()
+end
+
+function Profile:InitializeDatabase()
+	BuckleUpSidecarDB = BuckleUpSidecarDB or {}
+	BuckleUpSidecarDB.assignments = BuckleUpSidecarDB.assignments or {}
+	BuckleUpSidecarDB.layoutSnapshots = BuckleUpSidecarDB.layoutSnapshots or {}
 end
 
 function Profile:NormalizeProfile(profile)
@@ -183,6 +163,52 @@ end
 function Profile:CommitProfile()
 	local profiles = self:GetProfilesTable()
 	profiles[addon.profileKey] = addon.profile
+end
+
+function Profile:ForEachStoredProfile(callback)
+	if type(callback) ~= "function" then
+		return
+	end
+
+	self:InitializeDatabase()
+	for characterKey, profiles in pairs(BuckleUpSidecarDB.assignments or {}) do
+		if type(profiles) == "table" then
+			for specKey, profile in pairs(profiles) do
+				if type(profile) == "table" then
+					callback(profile, characterKey, tostring(specKey))
+				end
+			end
+		end
+	end
+end
+
+function Profile:NormalizeOrdersForEntries(entries)
+	NormalizeOrdersByContainer(entries or {})
+end
+
+function Profile:MakeSnapshotKey(characterKey, specKey)
+	return string.format("%s::%s", tostring(characterKey or self:GetCurrentCharacterKey()), tostring(specKey or util.GetCurrentSpecKey()))
+end
+
+function Profile:SplitSnapshotKey(snapshotKey)
+	local normalizedKey = tostring(snapshotKey or "")
+	local characterKey, specKey = normalizedKey:match("^(.-)::(.-)$")
+	if characterKey and specKey and characterKey ~= "" and specKey ~= "" then
+		return characterKey, specKey
+	end
+	return nil, normalizedKey ~= "" and normalizedKey or nil
+end
+
+function Profile:GetCharacterDisplayName(characterKey)
+	local name, realm = tostring(characterKey or ""):match("^(.-)%-(.-)%-.+$")
+	if name and realm then
+		return string.format("%s-%s", name, realm)
+	end
+	return tostring(characterKey or "Unknown")
+end
+
+function Profile:BuildSnapshotLabel(characterKey, specKey)
+	return string.format("%s (%s)", util.GetSpecNameFromKey(specKey), self:GetCharacterDisplayName(characterKey))
 end
 
 function Profile:GetBars()
@@ -310,7 +336,7 @@ function Profile:UpdateBarLayout(barID, fields)
 end
 
 function Profile:NormalizeOrders()
-	NormalizeOrdersByContainer(addon.profile.entries)
+	self:NormalizeOrdersForEntries(addon.profile.entries)
 end
 
 function Profile:GetConfiguredEntries()
@@ -354,7 +380,7 @@ function Profile:RemoveEntry(entryID)
 	local entries = self:GetConfiguredEntries()
 	for index, entry in ipairs(entries) do
 		if entry.id == entryID then
-			if entry.kind == "trinketSlot" then
+			if entry.kind == "trinketSlot" or entry.kind == "racial" then
 				return false, "protected_entry"
 			end
 			util.tremove(entries, index)
@@ -470,12 +496,16 @@ function Profile:GetEntriesForContainer(containerID)
 end
 
 function Profile:RecordLayoutSnapshot()
+	local characterKey = self:GetCurrentCharacterKey()
 	local specKey = addon.profileKey or util.GetCurrentSpecKey()
+	local snapshotKey = self:MakeSnapshotKey(characterKey, specKey)
 	local layouts = self:GetAccountLayoutsTable()
-	layouts[tostring(specKey)] = {
-		label = util.GetSpecNameFromKey(specKey),
+	layouts[snapshotKey] = {
+		label = self:BuildSnapshotLabel(characterKey, specKey),
+		characterKey = characterKey,
 		specKey = tostring(specKey),
 		bars = util.DeepCopy(self:GetBars()),
+		entries = util.DeepCopy(self:GetConfiguredEntries()),
 	}
 end
 
@@ -485,23 +515,31 @@ function Profile:GetSnapshotByKey(snapshotKey)
 	end
 
 	local normalizedKey = tostring(snapshotKey)
-	local profileSnapshot = self:GetProfilesTable()[normalizedKey]
-	if profileSnapshot and type(profileSnapshot.bars) == "table" then
-		return {
-			key = normalizedKey,
-			label = util.GetSpecNameFromKey(normalizedKey),
-			specKey = normalizedKey,
-			bars = util.DeepCopy(profileSnapshot.bars or {}),
-		}
+	local requestedCharacterKey, requestedSpecKey = self:SplitSnapshotKey(normalizedKey)
+	if requestedCharacterKey and BuckleUpSidecarDB and BuckleUpSidecarDB.assignments then
+		local characterProfiles = BuckleUpSidecarDB.assignments[requestedCharacterKey]
+		local profileSnapshot = characterProfiles and characterProfiles[requestedSpecKey]
+		if profileSnapshot and type(profileSnapshot.bars) == "table" then
+			return {
+				key = normalizedKey,
+				label = self:BuildSnapshotLabel(requestedCharacterKey, requestedSpecKey),
+				characterKey = requestedCharacterKey,
+				specKey = tostring(requestedSpecKey),
+				bars = util.DeepCopy(profileSnapshot.bars or {}),
+				entries = util.DeepCopy(profileSnapshot.entries or {}),
+			}
+		end
 	end
 
 	local storedSnapshot = self:GetAccountLayoutsTable()[normalizedKey]
 	if storedSnapshot and type(storedSnapshot.bars) == "table" then
 		return {
 			key = normalizedKey,
-			label = storedSnapshot.label or util.GetSpecNameFromKey(normalizedKey),
-			specKey = tostring(storedSnapshot.specKey or normalizedKey),
+			label = storedSnapshot.label or self:BuildSnapshotLabel(storedSnapshot.characterKey, storedSnapshot.specKey or requestedSpecKey),
+			characterKey = tostring(storedSnapshot.characterKey or requestedCharacterKey or self:GetCurrentCharacterKey()),
+			specKey = tostring(storedSnapshot.specKey or requestedSpecKey or normalizedKey),
 			bars = util.DeepCopy(storedSnapshot.bars or {}),
+			entries = util.DeepCopy(storedSnapshot.entries or {}),
 		}
 	end
 
@@ -510,30 +548,34 @@ end
 
 function Profile:GetLayoutSnapshots()
 	local layouts = self:GetAccountLayoutsTable()
-	local profiles = self:GetProfilesTable()
 	local snapshots = {}
 	local seen = {}
 
-	for specKey, profile in pairs(profiles) do
+	self:ForEachStoredProfile(function(profile, characterKey, specKey)
 		if type(profile) == "table" and type(profile.bars) == "table" then
-			local snapshotKey = tostring(specKey)
+			local snapshotKey = self:MakeSnapshotKey(characterKey, specKey)
 			snapshots[#snapshots + 1] = {
 				key = snapshotKey,
-				label = util.GetSpecNameFromKey(specKey),
+				label = self:BuildSnapshotLabel(characterKey, specKey),
+				characterKey = tostring(characterKey),
 				specKey = tostring(specKey),
 				bars = util.DeepCopy(profile.bars or {}),
+				entries = util.DeepCopy(profile.entries or {}),
 			}
 			seen[snapshotKey] = true
 		end
-	end
+	end)
 
 	for snapshotKey, snapshot in pairs(layouts) do
 		if not seen[snapshotKey] then
+			local characterKey, parsedSpecKey = self:SplitSnapshotKey(snapshotKey)
 			snapshots[#snapshots + 1] = {
 				key = snapshotKey,
-				label = snapshot.label or util.GetSpecNameFromKey(snapshotKey),
-				specKey = tostring(snapshot.specKey or snapshotKey),
+				label = snapshot.label or self:BuildSnapshotLabel(snapshot.characterKey or characterKey, snapshot.specKey or parsedSpecKey),
+				characterKey = tostring(snapshot.characterKey or characterKey or self:GetCurrentCharacterKey()),
+				specKey = tostring(snapshot.specKey or parsedSpecKey or snapshotKey),
 				bars = util.DeepCopy(snapshot.bars or {}),
+				entries = util.DeepCopy(snapshot.entries or {}),
 			}
 		end
 	end
@@ -555,6 +597,11 @@ function Profile:ApplyLayoutSnapshot(snapshotKey)
 	end
 	if #addon.profile.bars == 0 then
 		addon.profile.bars[1] = NormalizeBar(addon.Defaults.profile.bars[1], 1)
+	end
+
+	addon.profile.entries = {}
+	for _, entry in ipairs(snapshot.entries or {}) do
+		addon.profile.entries[#addon.profile.entries + 1] = NormalizeEntry(entry)
 	end
 
 	local validBarIDs = {}

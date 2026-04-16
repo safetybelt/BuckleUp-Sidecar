@@ -145,7 +145,8 @@ local function GetEntryVisual(entry)
 		info.isUsable = readiness and readiness:IsItemReadyForUse(info.itemID, nil) or false
 	elseif entry.kind == "spell" or entry.kind == "racial" then
 		info.spellID = catalogEntry.spellID
-		info.isAvailable = util.IsKnownPlayerSpell(catalogEntry.spellID)
+		info.isRelevant = catalogEntry.isRelevant ~= false
+		info.isAvailable = info.isRelevant and util.IsKnownPlayerSpell(catalogEntry.spellID)
 		info.isUsable = info.isAvailable
 	end
 
@@ -156,12 +157,7 @@ local function ShouldShowEntryOnBar(entry, visual)
 	if not visual then
 		return false
 	end
-
-	if entry.kind == "trinketSlot" then
-		return visual.itemID ~= nil and visual.hasUseEffect == true
-	end
-
-	return true
+	return addon.Catalog:ShouldShowOnRuntimeBar(entry, addon.Catalog:GetEntry(entry.id))
 end
 
 local function ApplySpellCooldown(button, spellID)

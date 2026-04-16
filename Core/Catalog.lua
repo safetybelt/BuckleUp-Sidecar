@@ -10,6 +10,76 @@ local function AddCatalogEntry(catalog, entry)
 	catalog[entry.id] = entry
 end
 
+local function NormalizeCustomEntry(entry)
+	local normalized = util.ShallowCopy(entry or {})
+	normalized.id = normalized.id or util.MakeEntryID(normalized.kind, normalized.spellID or normalized.itemID)
+	normalized.kind = normalized.kind == "item" and "item" or "spell"
+	normalized.source = "custom"
+	normalized.isCustom = true
+	normalized.isProtected = false
+	return normalized
+end
+
+function Catalog:GetDatabaseRoot()
+	BuckleUpSidecarDB = BuckleUpSidecarDB or {}
+	BuckleUpSidecarDB.catalog = BuckleUpSidecarDB.catalog or {}
+	BuckleUpSidecarDB.catalog.customEntries = BuckleUpSidecarDB.catalog.customEntries or {}
+	BuckleUpSidecarDB.catalog.options = BuckleUpSidecarDB.catalog.options or {}
+	if BuckleUpSidecarDB.catalog.options.showFullCatalog == nil then
+		BuckleUpSidecarDB.catalog.options.showFullCatalog = false
+	end
+	return BuckleUpSidecarDB.catalog
+end
+
+function Catalog:GetCustomEntriesTable()
+	return self:GetDatabaseRoot().customEntries
+end
+
+function Catalog:GetOptions()
+	return self:GetDatabaseRoot().options
+end
+
+function Catalog:IsFullCatalogViewEnabled()
+	return self:GetOptions().showFullCatalog == true
+end
+
+function Catalog:SetFullCatalogViewEnabled(enabled)
+	self:GetOptions().showFullCatalog = enabled == true
+	return true
+end
+
+function Catalog:StoreCustomEntry(entryData)
+	local entry = NormalizeCustomEntry(entryData)
+	self:GetCustomEntriesTable()[entry.id] = entry
+	return entry
+end
+
+function Catalog:DeleteCustomEntry(entryID)
+	local customEntries = self:GetCustomEntriesTable()
+	local existing = customEntries[entryID]
+	if not existing then
+		return false, "missing_entry"
+	end
+
+	customEntries[entryID] = nil
+	if addon.Profile and addon.Profile.ForEachStoredProfile then
+		addon.Profile:ForEachStoredProfile(function(profile)
+			local filteredEntries = {}
+			for _, entry in ipairs(profile.entries or {}) do
+				if entry.id ~= entryID then
+					filteredEntries[#filteredEntries + 1] = entry
+				end
+			end
+			profile.entries = filteredEntries
+			if addon.Profile.NormalizeOrdersForEntries then
+				addon.Profile:NormalizeOrdersForEntries(profile.entries)
+			end
+		end)
+	end
+
+	return true
+end
+
 function Catalog:BuildTrinketCatalog(catalog)
 	for _, slotID in ipairs({ 13, 14 }) do
 		local itemID = GetInventoryItemID("player", slotID)
@@ -26,6 +96,9 @@ function Catalog:BuildTrinketCatalog(catalog)
 				icon = icon,
 				isAvailable = itemID ~= nil,
 				hasUseEffect = hasUseEffect,
+				source = "builtin",
+				isCustom = false,
+				isProtected = true,
 			})
 		end
 	end
@@ -43,52 +116,52 @@ function Catalog:BuildRacialCatalog(catalog)
 				spellID = spellID,
 				name = name,
 				icon = util.GetSpellTextureSafe(spellID),
+				isRelevant = true,
 				isAvailable = true,
+				source = "builtin",
+				isCustom = false,
+				isProtected = true,
 			})
 		end
 	end
 end
 
-function Catalog:BuildPersistedEntryCatalog(catalog)
-	for _, entry in ipairs(addon.Profile:GetConfiguredEntries()) do
-		if entry.kind == "spell" or entry.kind == "racial" then
+function Catalog:BuildCustomEntryCatalog(catalog)
+	for entryID, storedEntry in pairs(self:GetCustomEntriesTable()) do
+		local entry = NormalizeCustomEntry(storedEntry)
+		if entry.kind == "spell" then
 			local spellID = entry.spellID
 			if util.IsValidSpellID(spellID) then
+				local isRelevant = util.IsSpellRelevantToCurrentSpec(spellID)
 				AddCatalogEntry(catalog, {
-					id = entry.id,
-					kind = entry.kind,
+					id = entryID,
+					kind = "spell",
 					spellID = spellID,
 					name = util.GetSpellNameSafe(spellID) or ("Spell " .. tostring(spellID)),
-					icon = util.GetSpellTextureSafe(spellID),
-					isAvailable = util.IsKnownPlayerSpell(spellID),
+					icon = util.GetSpellTextureSafe(spellID) or constants.FALLBACK_ITEM_ICON,
+					isRelevant = isRelevant,
+					isAvailable = isRelevant and util.IsKnownPlayerSpell(spellID) or false,
+					source = "custom",
+					isCustom = true,
+					isProtected = false,
 				})
 			end
 		elseif entry.kind == "item" then
 			local itemID = entry.itemID
-			if util.IsItemResolvable(itemID) then
-				local itemName = util.GetItemNameSafe(itemID) or ("Item " .. tostring(itemID))
-				local itemIcon = util.GetItemIconSafe(itemID) or constants.FALLBACK_ITEM_ICON
+			if itemID then
 				AddCatalogEntry(catalog, {
-					id = entry.id,
+					id = entryID,
 					kind = "item",
 					itemID = itemID,
-					name = itemName,
-					icon = itemIcon,
-					isAvailable = itemName ~= nil,
+					name = util.GetItemNameSafe(itemID) or ("Item " .. tostring(itemID)),
+					icon = util.GetItemIconSafe(itemID) or constants.FALLBACK_ITEM_ICON,
+					isRelevant = true,
+					isAvailable = util.IsItemUsableSafe(itemID),
+					source = "custom",
+					isCustom = true,
+					isProtected = false,
 				})
 			end
-		elseif entry.kind == "trinketSlot" then
-			local slotID = entry.slotID
-			AddCatalogEntry(catalog, {
-				id = entry.id,
-				kind = "trinketSlot",
-				slotID = slotID,
-				itemID = GetInventoryItemID("player", slotID),
-				name = util.GetInventoryItemName("player", slotID) or ("Trinket " .. tostring(slotID == 13 and 1 or 2)),
-				icon = GetInventoryItemTexture("player", slotID) or constants.FALLBACK_ITEM_ICON,
-				isAvailable = GetInventoryItemID("player", slotID) ~= nil,
-				hasUseEffect = util.IsUsableTrinketSlot(slotID),
-			})
 		end
 	end
 end
@@ -97,7 +170,7 @@ function Catalog:Rebuild()
 	local catalog = {}
 	self:BuildTrinketCatalog(catalog)
 	self:BuildRacialCatalog(catalog)
-	self:BuildPersistedEntryCatalog(catalog)
+	self:BuildCustomEntryCatalog(catalog)
 	addon.catalog = catalog
 	return catalog
 end
@@ -109,6 +182,42 @@ end
 function Catalog:GetEntry(entryID)
 	local catalog = self:Get()
 	return catalog and catalog[entryID]
+end
+
+function Catalog:ShouldShowInOrganizer(entry, configuredEntry)
+	if not entry then
+		return false
+	end
+
+	if self:IsFullCatalogViewEnabled() then
+		return true
+	end
+
+	if entry.kind ~= "spell" then
+		return true
+	end
+
+	if configuredEntry and configuredEntry.containerID ~= constants.HIDDEN_CONTAINER_ID then
+		return true
+	end
+
+	return entry.isRelevant == true
+end
+
+function Catalog:ShouldShowOnRuntimeBar(entry, catalogEntry)
+	if not entry or not catalogEntry then
+		return false
+	end
+
+	if entry.kind == "trinketSlot" then
+		return catalogEntry.itemID ~= nil and catalogEntry.hasUseEffect == true
+	end
+
+	if entry.kind == "spell" then
+		return catalogEntry.isRelevant == true
+	end
+
+	return true
 end
 
 function Catalog:GetOrderedEntries()
