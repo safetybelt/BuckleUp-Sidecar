@@ -1,96 +1,97 @@
-# BuckleUpSidecar
+# BuckleUp Sidecar
 
-`BuckleUpSidecar` is a hybrid World of Warcraft addon that supplements Blizzard's native Cooldown Viewer instead of replacing it.
+`BuckleUp Sidecar` is a lightweight World of Warcraft addon that extends Blizzard's native Cooldown Manager instead of replacing it.
 
-Blizzard keeps ownership of Blizzard-managed spell cooldowns and their built-in aura behavior. `BuckleUpSidecar` adds flexible, addon-owned bars for the gaps Blizzard does not handle well by default:
+If you like Blizzard's cooldown system but want a clean place for the things Blizzard does not handle well by default, Sidecar gives you that extra space without turning your UI into a full cooldown replacement addon.
 
-- trinket slots
+Blizzard keeps ownership of Blizzard-managed spell cooldowns and built-in aura behavior. Sidecar focuses on the supplemental pieces:
+
+- trinkets
 - racials
-- custom spells by spell ID
-- custom items by item ID
+- items
+- additional spells
 
-## What It Does
+![BuckleUp Sidecar hero screenshot](Screenshots/sidecar-hero.png)
 
-- embeds a `Sidecar` tab directly into Blizzard's cooldown settings
-- lets you drag entries between user bars and `Not Displayed`
-- uses Blizzard Edit Mode for Sidecar bar placement and snap behavior
-- provides a Sidecar Edit Mode panel for bar presentation settings
-- supports live bar matching against Blizzard `Essential` and `Utility` cooldown viewers
-- optionally applies a unified square-style visual treatment to both Sidecar bars and Blizzard cooldown viewers
+_Sidecar extends Blizzard's cooldown bars with trinkets, racials, and custom utility while keeping the same visual language._
 
-## Current Features
+## Why Try It
+
+Sidecar is for players who:
+
+- like Blizzard's default cooldown manager and want to keep using it
+- want a clean place for racials, trinkets, potions, healthstones, and niche utility
+- want addon-owned bars that still feel like part of Blizzard's UI
+- do not want a giant all-in-one cooldown replacement
+
+In short: Sidecar gives Blizzard's cooldown manager a little more room to breathe.
+
+## What Makes It Different
+
+- it works with Blizzard's cooldown manager rather than competing with it
+- it embeds directly into Blizzard's cooldown settings
+- Sidecar bars are placed in Blizzard Edit Mode and can snap to Blizzard UI
+- bars can live-match Blizzard presentation settings
+- an optional unified visual style can make Sidecar and Blizzard cooldowns look a bit more modern
+
+![BuckleUp Sidecar unified style screenshot](Screenshots/sidecar-style.png)
+
+_Optional unified visual style keeps Blizzard and Sidecar cooldowns visually aligned with square icons, tighter crop, and matching borders._
+
+## Key Features
 
 - embedded `Sidecar` tab inside Blizzard's cooldown settings
-- drag-and-drop organizer with `Not Displayed` and user bars
-- custom side-tab icon and Blizzard-aligned styling
-- add custom spells by spell ID and custom items by item ID
+- drag-and-drop organizer with user bars
+- drag a spell from your spellbook or an item from your bags into Sidecar to add it
 - create, rename, and delete Sidecar bars
-- Blizzard Edit Mode placement for Sidecar bars
-- Sidecar Edit Mode panel for `Match Mode`, size, padding, opacity, visibility, and growth direction
-- live `Match Essential Bar` / `Match Utility Bar` presentation modes
-- spec-based layouts with copy-from-other-spec support
-- optional runtime tooltip toggle
-- optional unified visual style for Sidecar runtime bars and Blizzard cooldown viewers
-- custom spell and item validation before entries are added
-- slash-command removal for accidental custom entries
+- move and adjust Sidecar bars in Blizzard Edit Mode
+- optional live `Match Essential Bar` / `Match Utility Bar` presentation modes
+- optional unified square-style visual treatment for both Sidecar and Blizzard cooldown viewers
+- spec-based bar assignments with copy/import support
+- account-wide custom item/spell catalog
 
-## Runtime Behavior
+![BuckleUp Sidecar configuration panel screenshot](Screenshots/sidecar-config.png)
 
-- Blizzard-owned spell cooldowns stay in Blizzard's viewer
-- Sidecar-owned entries render only on Sidecar bars
-- custom items remain visible on Sidecar bars and gray out when unavailable or unusable
-- spell and racial entries gray out based on runtime cooldown/charge state
-- passive trinkets can stay assigned in config, but do not occupy runtime bar space until an on-use trinket is equipped in that slot
-- deleting a bar moves its assigned entries back to `Not Displayed`
-- trinket slot entries are protected from deletion
-- custom-entry aura swapping is not a guaranteed feature
+## Placement And Customization
 
-## Bar Placement And Presentation
+Sidecar bars are moved in Blizzard Edit Mode.
 
-- Sidecar bars are moved in Blizzard Edit Mode
-- Sidecar bars can stay attached to Blizzard cooldown viewers
-- the Sidecar Edit Mode panel exposes:
-  - `Match Mode`: `Manual`, `Match Essential Bar`, `Match Utility Bar`
-  - `Size`: `50%` to `200%`
-  - `Padding`: `0` to `14`
-  - `Opacity`: `50%` to `100%`
-  - `Visibility`: `Always`, `In Combat`, `Hidden`
-  - `Growth Direction`: `Left`, `Center`, `Right`
-- when a match mode is enabled, Sidecar follows the matched Blizzard bar's presentation settings live
+Sidecar bars can:
 
-## Unified Visual Style
+- snap to Blizzard cooldown viewers and other Blizzard UI elements
+- keep following Blizzard elements after being placed
+- use a Sidecar-owned Edit Mode panel that feels consistent with Blizzard's settings flow
+- have their own styling, match the Blizzard Essential Bar, or match the Blizzard Utility Bar
 
-- the unified visual style option restyles:
-  - Sidecar runtime bars
-  - Blizzard `Essential` cooldown viewer
-  - Blizzard `Utility` cooldown viewer
-  - Blizzard tracked buff icon and bar viewers
-- the feature changes presentation only; Blizzard still owns Blizzard cooldown logic and aura behavior
+When match mode is enabled, Sidecar follows the matched Blizzard bar's presentation settings live.
+
+![BuckleUp Sidecar edit mode example](Screenshots/sidecar-edit-mode.gif)
+
+_Sidecar bars move in Blizzard Edit Mode, snap to Blizzard UI, and keep following the elements they are anchored to._
 
 ## Slash Commands
 
 - `/bus config` opens Blizzard's Cooldown Viewer settings and shows the Sidecar panel
-- `/bus catalog`
-- `/bus profile`
-- `/bus layouts`
-- `/bus addspell <spellID>`
-- `/bus additem <itemID>`
-- `/bus remove <entryID|rawID>`
-- `/bus move <entryID|rawID> <barID|hidden>`
-- `/bus addbar <name>`
-
-## Data Model
-
-- active profile data is spec-based
-- layout snapshot copy/import is spec-based
-- bars and entries are stored in `BuckleUpSidecarDB`
+- `/bus remove <entryID|rawID>` removes a custom entry by entry ID or raw spell/item ID
 
 ## Limitations
 
 - this is not a replacement cooldown manager
 - Blizzard-owned spell cooldowns are intentionally left to Blizzard
-- addon-owned entries are focused on reliable cooldown display, not automatic aura-swap parity with Blizzard
+- Sidecar focuses on reliable supplemental cooldown display, not complete Blizzard aura-parity emulation
+
+## Feedback / Bugs
+
+If you try the addon and run into issues, feedback is encouraged.
+
+Bug reports are especially useful if they include:
+
+- class/spec
+- what Blizzard bar(s) you were matching, if any
+- whether unified visual style was enabled
+- what you expected to happen
+- what actually happened
 
 ## License
 
-MIT. See [LICENSE](D:/projects/WoW%20Addons/BuckleUpSidecar/LICENSE).
+MIT. See [LICENSE](https://github.com/safetybelt/BuckleUp-Sidecar/blob/main/LICENSE).
