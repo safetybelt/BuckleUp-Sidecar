@@ -160,6 +160,16 @@ function SettingsIntegration:SetupSidecarLayoutDropdown()
 	dropdown:Show()
 end
 
+function SettingsIntegration:ReassertSidecarSharedControls()
+	if not (self.panel and self.panel:IsShown()) then
+		return
+	end
+
+	self:HideNativeContent()
+	self:SetupSidecarLayoutDropdown()
+	self:RefreshPanel()
+end
+
 function SettingsIntegration:SetSidecarTabChecked(checked)
 	if self.sidecarTab then
 		self.sidecarTab:SetChecked(checked)
@@ -184,6 +194,24 @@ function SettingsIntegration:ClearStaleSidecarTabCheck()
 	if self.sidecarTab and not (self.panel and self.panel:IsShown()) and self.sidecarTab:GetChecked() then
 		self.sidecarTab:SetChecked(false)
 	end
+	self:RefreshSidecarTabVisual()
+end
+
+function SettingsIntegration:SyncNativeTabChecks(displayMode)
+	local settings = self:GetSettingsFrame()
+	if not settings then
+		return
+	end
+
+	local resolvedDisplayMode = displayMode or settings.displayMode
+	for _, tab in ipairs(settings.TabButtons or {}) do
+		if tab == self.sidecarTab then
+			tab:SetChecked(false)
+		elseif tab.displayMode then
+			tab:SetChecked(tab.displayMode == resolvedDisplayMode)
+		end
+	end
+
 	self:RefreshSidecarTabVisual()
 end
 
@@ -234,9 +262,7 @@ function SettingsIntegration:ShowSidecarPanel()
 	-- show cycle. Reassert Sidecar ownership on the next frame so /bus config opens reliably.
 	C_Timer.After(0, function()
 		if self.panel and self.panel:IsShown() then
-			self:HideNativeContent()
-			self:SetupSidecarLayoutDropdown()
-			self:RefreshPanel()
+			self:ReassertSidecarSharedControls()
 		end
 	end)
 end
@@ -296,10 +322,15 @@ function SettingsIntegration:HookNativeTabs()
 	for _, tab in ipairs(settings.TabButtons or {}) do
 		if tab ~= self.sidecarTab and not tab.BuckleUpSidecarHooked then
 			tab.BuckleUpSidecarHooked = true
-			tab:HookScript("OnMouseUp", function(_, button)
+			tab:HookScript("OnMouseUp", function(clickedTab, button)
 				if button == "LeftButton" and self.panel and self.panel:IsShown() then
 					self:HideSidecarPanel()
 					self:ShowNativeContent()
+					C_Timer.After(0, function()
+						if not (self.panel and self.panel:IsShown()) then
+							self:SyncNativeTabChecks(clickedTab.displayMode)
+						end
+					end)
 				end
 			end)
 		end
@@ -335,7 +366,14 @@ function SettingsIntegration:Initialize()
 			self:ShowNativeContent()
 		end
 		if settingsFrame == self:GetSettingsFrame() then
+			self:SyncNativeTabChecks(settingsFrame.displayMode)
 			self:ClearStaleSidecarTabCheck()
+		end
+	end)
+
+	hooksecurefunc(CooldownViewerSettingsMixin, "SetupLayoutManagerDropdown", function(settingsFrame)
+		if settingsFrame == self:GetSettingsFrame() then
+			self:ReassertSidecarSharedControls()
 		end
 	end)
 

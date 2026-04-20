@@ -41,7 +41,13 @@ local function ParseManualEntryInput(rawText)
 	local isValidSpell = addon.Util.IsValidSpellID(numericID)
 	local isExistingItem = addon.Util.DoesItemExistSafe and addon.Util.DoesItemExistSafe(numericID)
 	if isValidSpell and isExistingItem then
-		return nil, "ambiguous"
+		local isKnownPlayerSpell = addon.Util.IsKnownPlayerSpell and addon.Util.IsKnownPlayerSpell(numericID)
+		local isRelevantSpell = addon.Util.IsSpellRelevantToCurrentSpec and addon.Util.IsSpellRelevantToCurrentSpec(numericID)
+		if isKnownPlayerSpell or isRelevantSpell then
+			return "spell", numericID
+		end
+
+		return "item", numericID
 	end
 	if isValidSpell then
 		return "spell", numericID
@@ -86,6 +92,7 @@ local function EnsureDialog()
 		button1 = ADD,
 		button2 = CANCEL,
 		hasEditBox = true,
+		enterClicksFirstButton = true,
 		whileDead = true,
 		hideOnEscape = true,
 		timeout = 0,
@@ -152,6 +159,17 @@ local function EnsureDialog()
 			local parent = self:GetParent()
 			if parent and parent.button1 and parent.button1:IsEnabled() then
 				parent.button1:Click()
+			end
+		end,
+		EditBoxOnEscapePressed = function(self)
+			if type(StaticPopup_StandardEditBoxOnEscapePressed) == "function" then
+				StaticPopup_StandardEditBoxOnEscapePressed(self)
+				return
+			end
+
+			local parent = self:GetParent()
+			if parent then
+				parent:Hide()
 			end
 		end,
 	}
