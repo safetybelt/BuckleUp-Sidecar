@@ -2,7 +2,7 @@
 ## Title: BuckleUp: Sidecar
 ## Notes: Supplemental cooldown bars for trinkets, racials, consumables, and custom entries alongside Blizzard's cooldown viewer.
 ## Author: safetybelt
-## Version: 1.0.0
+## Version: 1.5.3
 ## SavedVariables: BuckleUpSidecarDB
 
 BuckleUpSidecar.lua
