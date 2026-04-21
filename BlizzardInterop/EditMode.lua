@@ -123,28 +123,40 @@ function EditMode:OnEditModeExit()
 		return
 	end
 
-	for _, barFrame in pairs(addon.barFrames) do
-		if barFrame.isDragging then
-			barFrame:StopMovingOrSizing()
-			barFrame.isDragging = false
+	self.exitCleanupToken = (self.exitCleanupToken or 0) + 1
+	local cleanupToken = self.exitCleanupToken
+
+	-- Blizzard fires EditMode.Exit inline during protected shutdown. Defer Sidecar's
+	-- frame cleanup until the next frame so we don't keep tainted execution alive
+	-- through Blizzard's own exit/reset work.
+	C_Timer.After(0, function()
+		if self.exitCleanupToken ~= cleanupToken or self:IsActive() or not addon.barFrames then
+			return
 		end
 
-		if addon.EditModeSelection then
-			addon.EditModeSelection:ClearBarSelection(barFrame)
+		for _, barFrame in pairs(addon.barFrames) do
+			if barFrame.isDragging then
+				barFrame:StopMovingOrSizing()
+				barFrame.isDragging = false
+			end
+
+			if addon.EditModeSelection then
+				addon.EditModeSelection:ClearBarSelection(barFrame)
+			end
+			barFrame.isEditModeActive = false
+			self:SaveBarAnchor(barFrame.barID, barFrame)
 		end
-		barFrame.isEditModeActive = false
-		self:SaveBarAnchor(barFrame.barID, barFrame)
-	end
 
-	if EditModeManagerFrame and EditModeManagerFrame.ClearSnapPreviewFrame then
-		EditModeManagerFrame:ClearSnapPreviewFrame()
-	end
+		if EditModeManagerFrame and EditModeManagerFrame.ClearSnapPreviewFrame then
+			EditModeManagerFrame:ClearSnapPreviewFrame()
+		end
 
-	self.selectedBarFrame = nil
-	self:HidePanel()
-	if addon.Bars then
-		addon.Bars:RefreshRuntime()
-	end
+		self.selectedBarFrame = nil
+		self:HidePanel()
+		if addon.Bars then
+			addon.Bars:RefreshRuntime()
+		end
+	end)
 end
 
 function EditMode:HandleExternalSelectionChange(selectedSystem)
